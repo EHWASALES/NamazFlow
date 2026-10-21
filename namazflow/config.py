@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shlex
 import sys
 
 DEFAULTS = {
@@ -20,6 +19,7 @@ DEFAULTS = {
     "x": None,
     "y": None,
     "quote": True,
+    "icons": {"Fajr": "sunrise", "Dhuhr": "sun", "Asr": "afternoon", "Maghrib": "sunset", "Isha": "crescent"},
 }
 THEMES = ("midnight", "emerald", "sand")
 SYMBOLS = ("crescent", "mosque", "star", "lantern")
@@ -31,7 +31,7 @@ def data_path() -> Path:
 
 
 def normalize(raw: dict | None) -> dict:
-    data = DEFAULTS.copy()
+    data = {**DEFAULTS, "icons": DEFAULTS["icons"].copy()}
     if not isinstance(raw, dict):
         return data
     for key in DEFAULTS:
@@ -49,6 +49,11 @@ def normalize(raw: dict | None) -> dict:
         data["theme"] = "midnight"
     if data["symbol"] not in SYMBOLS:
         data["symbol"] = "crescent"
+    if isinstance(raw.get("icons"), dict):
+        for prayer in DEFAULTS["icons"]:
+            icon = raw["icons"].get(prayer)
+            if icon in ("sunrise", "sun", "afternoon", "sunset", "crescent", "mosque", "star", "lantern"):
+                data["icons"][prayer] = icon
     return data
 
 
@@ -57,7 +62,7 @@ def load(path: Path | None = None) -> dict:
     try:
         return normalize(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, ValueError):
-        return DEFAULTS.copy()
+        return {**DEFAULTS, "icons": DEFAULTS["icons"].copy()}
 
 
 def save(settings: dict, path: Path | None = None) -> None:
