@@ -77,7 +77,7 @@ def save_reference_comparison(reference_path, screenshot_path):
     actual = Image.open(screenshot_path).convert("RGBA")
     backdrop = Image.new("RGBA", actual.size, "#283743")
     backdrop.alpha_composite(actual)
-    rendered = backdrop.crop((17, 111, 443, 707)).convert("RGB").resize((426, 666))
+    rendered = backdrop.crop((128, 39, 554, 635)).convert("RGB").resize((426, 666))
     paired = Image.new("RGB", (900, 720), "#EBEAEB")
     paired.paste(before, (12, 42))
     paired.paste(rendered, (462, 42))
