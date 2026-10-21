@@ -15,7 +15,7 @@ from pathlib import Path
 import sys
 from zoneinfo import ZoneInfo
 
-from PIL import Image, ImageStat
+from PIL import Image, ImageDraw
 from PySide6.QtWidgets import QApplication
 from namazflow.prayers import PrayerDay
 from namazflow.ui import NamazWidget
@@ -64,6 +64,29 @@ def reference_characteristics(path):
     metrics = measure(image.convert("RGBA"))
     return metrics
 
+
+
+def save_reference_comparison(reference_path, screenshot_path):
+    """Export transparent side-by-side evidence, no false similarity score."""
+    reference = Image.open(reference_path).convert("RGB")
+    if reference.width > reference.height * 1.35:
+        reference = reference.crop(
+            (int(reference.width * .675), int(reference.height * .075),
+             int(reference.width * .925), int(reference.height * .77)))
+    before = reference.resize((426, 666))
+    actual = Image.open(screenshot_path).convert("RGBA")
+    backdrop = Image.new("RGBA", actual.size, "#283743")
+    backdrop.alpha_composite(actual)
+    rendered = backdrop.crop((17, 111, 443, 707)).convert("RGB").resize((426, 666))
+    paired = Image.new("RGB", (900, 720), "#EBEAEB")
+    paired.paste(before, (12, 42))
+    paired.paste(rendered, (462, 42))
+    painter = ImageDraw.Draw(paired)
+    painter.text((15, 15), "APPROVED CONCEPT / ORIGINAL", fill="#172028")
+    painter.text((467, 15), "ACTUAL QT WIDGET / CURRENT DESIGN", fill="#172028")
+    destination = OUT / "reference-vs-qt.png"
+    paired.save(destination)
+    return str(destination)
 
 def evaluate(label, img, target, reference=None):
     values = measure(img)
@@ -128,7 +151,9 @@ def main():
     p3 = OUT / "iteration-3-custom-symbols.png"
     window.grab().save(str(p3))
     rows.append(evaluate("3 · Final customizable UI", Image.open(p3), "panel", ref))
+    comparison = save_reference_comparison(options.reference_image, p3) if options.reference_image else None
     report = {
+        "comparison_image": comparison,
         "mode": "DEMONSTRATION – screenshot prayer times are not live",
         "concept": "Approved NamazFlow gold / teal / dark floating widget",
         "reference_image_provided": bool(ref),
