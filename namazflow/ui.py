@@ -55,8 +55,10 @@ def font(size: float, weight: int = 400, family: str = "Segoe UI") -> QFont:
 
 
 def draw_text(p: QPainter, x: float, y: float, txt: str, size=12,
-              color=WHITE, weight=400, family="Segoe UI", align=None, width=300):
-    p.setFont(font(size, weight, family))
+              color=WHITE, weight=400, family="Segoe UI", align=None, width=300, italic=False):
+    text_font = font(size, weight, family)
+    text_font.setItalic(italic)
+    p.setFont(text_font)
     p.setPen(c(color))
     p.drawText(QRectF(x, y, width, 32), align or (Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), txt)
 
@@ -143,8 +145,8 @@ def mosque_etching(p: QPainter, x: float, y: float, scale: float = 1.0):
     p.save()
     p.translate(x, y)
     p.scale(scale, scale)
-    p.setPen(QPen(c(GOLD, 100), 1.2))
-    p.setBrush(c(GOLD, 42))
+    p.setPen(QPen(c(GOLD, 72), 1.0))
+    p.setBrush(c(GOLD, 23))
     dome = QPainterPath()
     dome.moveTo(-41, 0)
     dome.lineTo(-41, -17)
@@ -178,7 +180,7 @@ def rosette_etching(p: QPainter, x: float, y: float, size: float = 44):
     """Eightfold geometric gold filigree, masked by the parent panel."""
     p.save()
     p.translate(x, y)
-    p.setPen(QPen(c(GOLD, 52), 1.1))
+    p.setPen(QPen(c(GOLD, 40), 1.1))
     p.setBrush(Qt.BrushStyle.NoBrush)
     for angle in (0, 45, 90, 135):
         p.save()
@@ -529,7 +531,13 @@ class NamazWidget(QWidget):
         p.setPen(QPen(c(colors["accent"]), 4.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawArc(QRectF(center_x-43, center_y-43, 86, 86), 90 * 16, -int(pct * 360 * 16))
-        draw_symbol(p, self.settings.get("symbol", "crescent"), center_x, center_y-8, 31, GOLD)
+        draw_symbol(p, self.settings.get("symbol", "crescent"), center_x-2, center_y-8, 31, GOLD)
+        if self.settings.get("symbol", "crescent") == "crescent":
+            # One fine minaret balances the crescent as in the approved icon.
+            p.setPen(QPen(c(GOLD, 220), 1.3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            p.drawLine(center_x+14, center_y+6, center_x+14, center_y-19)
+            p.drawLine(center_x+10, center_y-11, center_x+18, center_y-11)
+            p.drawLine(center_x+14, center_y-19, center_x+14, center_y-23)
         draw_text(p, center_x-31, center_y+15,
                   countdown_text(upcoming[2]) if upcoming else "--:--", 11, WHITE, 600,
                   align=Qt.AlignmentFlag.AlignCenter, width=62)
@@ -587,7 +595,7 @@ class NamazWidget(QWidget):
             elif i < 4:
                 p.setPen(QPen(c("#6A7477", 35), 1))
                 p.drawLine(42, y + 48, 418, y + 48)
-            draw_symbol(p, icons.get(prayer, DEFAULT_ICONS[prayer]), 59, y+23, 25,
+            draw_symbol(p, icons.get(prayer, DEFAULT_ICONS[prayer]), 59, y+23, 28,
                         colors["accent"] if active == prayer else GOLD)
             text_color = colors["accent"] if active == prayer else WHITE
             draw_text(p, 91, y+6, prayer, 12, text_color, 600 if active == prayer else 450, width=180)
@@ -626,10 +634,10 @@ class NamazWidget(QWidget):
             draw_text(p, 40, 633, "“", 28, GOLD, 600, family="Georgia", width=30)
             quote = QUOTES.get(active or "Asr", QUOTES["Asr"])
             if active in ("Asr", "Maghrib") or not active:
-                draw_text(p, 72, 639, "Und gewiss, im Gedenken Allahs", 11, GOLD, 450, family="Georgia", width=345)
-                draw_text(p, 91, 657, "finden die Herzen Ruhe.", 11, GOLD, 450, family="Georgia", width=300)
+                draw_text(p, 72, 639, "Und gewiss, im Gedenken Allahs", 11, GOLD, 450, family="Georgia", width=345, italic=True)
+                draw_text(p, 91, 657, "finden die Herzen Ruhe.", 11, GOLD, 450, family="Georgia", width=300, italic=True)
             else:
-                draw_text(p, 72, 641, quote[0], 9.2, GOLD, 450, family="Georgia", width=350)
+                draw_text(p, 72, 641, quote[0], 9.2, GOLD, 450, family="Georgia", width=350, italic=True)
             p.setPen(QPen(c(GOLD, 120), 1))
             p.drawLine(210, 683, 277, 683)
             draw_text(p, 181, 684, quote[1], 7.2, MUTED, width=216)
