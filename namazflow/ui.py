@@ -1,423 +1,836 @@
-"""Pixel-drawn floating desktop interface for NamazFlow.
+"""Native desktop controls with independent orb and panel windows."""
 
-No paid fonts, external images or browser dependencies are required.
-"""
-from __future__ import annotations
-
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 import math
-import sys
 import threading
 from zoneinfo import ZoneInfo
-
-from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, Signal, QTimer, QEvent
+from PySide6.QtCore import (
+    Qt,
+    QPoint,
+    QRectF,
+    QSize,
+    QUrl,
+    Signal,
+    QTimer,
+    QVariantAnimation,
+    QPropertyAnimation,
+    QParallelAnimationGroup,
+    QEasingCurve,
+)
 from PySide6.QtGui import (
-    QColor, QBrush, QFont, QIcon, QLinearGradient, QPainter, QPainterPath,
-    QPen, QPixmap, QRadialGradient,
+    QBrush,
+    QIcon,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QRadialGradient,
+    QDesktopServices,
 )
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMenu,
-    QMessageBox, QSystemTrayIcon, QVBoxLayout, QWidget,
+    QApplication,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QComboBox,
+    QMenu,
+    QSystemTrayIcon,
+    QDialog,
+    QInputDialog,
+    QMessageBox,
+    QScrollArea,
+    QTextBrowser,
 )
-from .config import SYMBOLS, THEMES, data_path, load, save, set_windows_autostart
-from .prayers import METHODS, PRAYERS, countdown_text, current_prayer, get_day, next_prayer
+from .config import data_path, load, save, set_windows_autostart
+from .drawing import (
+    GOLD,
+    TEAL,
+    WHITE,
+    c,
+    font,
+    draw_symbol,
+    round_rect,
+    current_palette,
+    rosette_etching,
+)
+from .locations import LOCATIONS, location_label
+from .diyanet import get_calendar
+from .prayers import LABELS, PRAYERS, current_prayer, get_day, next_prayer
+from .quotes import get_quote
+from .settings import SettingsDialog
 
-GOLD = "#DBAE67"
-TEAL = "#56E4CE"
-WHITE = "#F6F1E9"
-MUTED = "#A7ACB2"
-ICONS = ("sunrise", "sun", "afternoon", "sunset", "crescent", "mosque", "star", "lantern")
+ICONS = (
+    "sunrise",
+    "sun",
+    "afternoon",
+    "sunset",
+    "crescent",
+    "mosque",
+    "star",
+    "lantern",
+)
+ICON_LABELS = (
+    "Sonnenaufgang",
+    "Sonne",
+    "Nachmittag",
+    "Sonnenuntergang",
+    "Halbmond",
+    "Moschee",
+    "Stern",
+    "Laterne",
+)
 DEFAULT_ICONS = dict(zip(PRAYERS, ICONS[:5]))
-QUOTES = {
-    "Fajr": ("Mit dem Morgen beginnt eine neue Möglichkeit.", "Erinnerung"),
-    "Dhuhr": ("Und verrichte das Gebet zu Meinem Gedenken.", "Koran 20:14 – sinngemäß"),
-    "Asr": ("Gewiss, im Gedenken Allahs finden die Herzen Ruhe.", "Koran 13:28 – sinngemäß"),
-    "Maghrib": ("Gewiss, im Gedenken Allahs finden die Herzen Ruhe.", "Koran 13:28 – sinngemäß"),
-    "Isha": ("Und Er ist es, Der die Nacht zum Ruhen machte.", "Koran 6:96 – sinngemäß"),
-}
-MONTHS = ("Januar", "Februar", "März", "April", "Mai", "Juni",
-          "Juli", "August", "September", "Oktober", "November", "Dezember")
-WEEKDAYS = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
+WEEKDAYS = (
+    "Montag",
+    "Dienstag",
+    "Mittwoch",
+    "Donnerstag",
+    "Freitag",
+    "Samstag",
+    "Sonntag",
+)
+MONTHS = (
+    "Januar",
+    "Februar",
+    "März",
+    "April",
+    "Mai",
+    "Juni",
+    "Juli",
+    "August",
+    "September",
+    "Oktober",
+    "November",
+    "Dezember",
+)
+STYLE = """
+QWidget { font-family:'Segoe UI'; color:#F6F1E9; font-size:13px; }
+QLabel { background:transparent; }
+QLabel#eyebrow { color:#DBAE67; font-size:10px; font-weight:600; letter-spacing:2px; }
+QLabel#title { font:24px 'Georgia'; }
+QLabel#muted { color:#A7ACB2; font-size:11px; }
+QPushButton { border:1px solid #45504F; border-radius:8px; padding:6px 9px; color:#D5C5AA; background:transparent; min-height:20px; }
+QPushButton:hover { background:#294440; border-color:#56E4CE; color:#F6F1E9; }
+QPushButton:pressed { background:#356158; }
+QPushButton:focus { border-color:#56E4CE; }
+QPushButton:disabled { color:#7F8D90; border-color:#344143; }
+QComboBox { background:#1E3035; color:#E3CFAC; border:1px solid #495550; border-radius:8px; padding:7px 9px; min-height:20px; }
+QComboBox::drop-down { border:none; width:24px; }
+QComboBox QAbstractItemView { background:#18282D; color:#F6F1E9; selection-background-color:#2B5149; min-width:265px; padding:5px; }
+QScrollArea { background:transparent; border:none; }
+QScrollBar:vertical { width:6px; background:transparent; margin:4px 0; }
+QScrollBar::handle:vertical { background:#4C625C; border-radius:3px; min-height:24px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
+QToolTip { background:#1A2D32; color:#EAD4AD; border:1px solid #687267; padding:7px; }
+QMenu { background:#19272C; color:#F6F1E9; border:1px solid #5C685E; padding:6px; }
+QMenu::item { padding:8px 18px; }
+QMenu::item:selected { background:#2B5149; }
+QMenu::separator { height:1px; background:#44534E; margin:5px; }
+"""
 
 
-def c(value: str, alpha: int = 255) -> QColor:
-    color = QColor(value)
-    color.setAlpha(alpha)
-    return color
-
-
-def font(size: float, weight: int = 400, family: str = "Segoe UI") -> QFont:
-    result = QFont(family)
-    result.setPointSizeF(size)
-    result.setWeight(QFont.Weight.Bold if weight >= 600 else (QFont.Weight.Medium if weight >= 500 else QFont.Weight.Normal))
-    return result
-
-
-def draw_text(p: QPainter, x: float, y: float, txt: str, size=12,
-              color=WHITE, weight=400, family="Segoe UI", align=None, width=300, italic=False):
-    text_font = font(size, weight, family)
-    text_font.setItalic(italic)
-    p.setFont(text_font)
-    p.setPen(c(color))
-    p.drawText(QRectF(x, y, width, 32), align or (Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), txt)
-
-
-def round_rect(p: QPainter, rect: QRectF, radius: float, fill, stroke=None, line=1):
-    path = QPainterPath()
-    path.addRoundedRect(rect, radius, radius)
-    p.fillPath(path, fill)
-    if stroke:
-        p.setPen(QPen(stroke, line))
-        p.drawPath(path)
-
-
-def draw_symbol(p: QPainter, kind: str, x: float, y: float, size=25, color=GOLD):
-    """Small, scalable vector symbols that stay crisp at 100–200% DPI."""
-    p.save()
-    p.translate(x, y)
-    p.scale(size / 30, size / 30)
+def icon_for(kind, size=32, color=GOLD):
+    pix = QPixmap(size * 2, size * 2)
+    pix.fill(Qt.GlobalColor.transparent)
+    pix.setDevicePixelRatio(2)
+    p = QPainter(pix)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(c(color), 2.1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-    p.setPen(pen)
-    p.setBrush(Qt.BrushStyle.NoBrush)
-    if kind in ("sunrise", "sunset", "afternoon"):
-        p.drawLine(-13, 8, 13, 8)
-        p.drawArc(QRectF(-8, 0, 16, 16), 0, 180 * 16)
-        for a in (0, 45, 90, 135, 180):
-            ang = math.radians(a)
-            p.drawLine(round(math.cos(ang) * 10), round(8 - math.sin(ang) * 10),
-                       round(math.cos(ang) * 13), round(8 - math.sin(ang) * 13))
-        if kind == "sunrise":
-            p.drawLine(-13, 12, -5, 12)
-            p.drawLine(5, 12, 13, 12)
-        if kind == "sunset":
-            p.drawLine(-13, 13, 13, 13)
-    elif kind == "sun":
-        p.drawEllipse(QRectF(-7, -7, 14, 14))
-        for a in range(0, 360, 45):
-            ang = math.radians(a)
-            p.drawLine(round(math.cos(ang) * 11), round(math.sin(ang) * 11),
-                       round(math.cos(ang) * 14), round(math.sin(ang) * 14))
-    elif kind == "crescent":
-        path = QPainterPath()
-        path.arcMoveTo(QRectF(-10, -12, 24, 24), 65)
-        path.arcTo(QRectF(-10, -12, 24, 24), 65, 275)
-        path.cubicTo(-8, 9, -3, -7, 3, -12)
-        p.setBrush(c(color))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawPath(path)
-    elif kind == "star":
-        path = QPainterPath()
-        for i in range(10):
-            angle = math.pi * i / 5 - math.pi / 2
-            radius = 13 if i % 2 == 0 else 5.6
-            point = QPoint(int(math.cos(angle) * radius), int(math.sin(angle) * radius))
-            if i == 0: path.moveTo(point)
-            else: path.lineTo(point)
-        path.closeSubpath()
-        p.setBrush(c(color, 170))
-        p.drawPath(path)
-    elif kind == "mosque":
-        p.drawLine(-14, 12, 14, 12)
-        p.drawLine(-9, 12, -9, 1)
-        p.drawArc(QRectF(-9, -10, 18, 22), 0, 180 * 16)
-        p.drawLine(9, 12, 9, 1)
-        p.drawLine(12, 11, 12, -11)
-        p.drawLine(10, -8, 14, -8)
-        p.drawLine(12, -11, 12, -15)
-        p.drawEllipse(QRectF(-1, -15, 2, 2))
-    elif kind == "lantern":
-        p.drawLine(0, -14, 0, -11)
-        p.drawLine(-5, -11, 5, -11)
-        p.drawLine(-8, -9, 8, -9)
-        p.drawLine(-8, -9, -10, 7)
-        p.drawLine(8, -9, 10, 7)
-        p.drawLine(-10, 7, 10, 7)
-        p.drawLine(-7, 11, 7, 11)
-        p.drawEllipse(QRectF(-3, -6, 6, 11))
-    p.restore()
+    draw_symbol(p, kind, size / 2, size / 2, size * 0.78, color)
+    p.end()
+    return QIcon(pix)
 
 
-
-def mosque_etching(p: QPainter, x: float, y: float, scale: float = 1.0):
-    """Etched domes/minaret from the approved concept; no external font/assets."""
-    p.save()
-    p.translate(x, y)
-    p.scale(scale, scale)
-    p.setPen(QPen(c(GOLD, 72), 1.0))
-    p.setBrush(c(GOLD, 23))
-    dome = QPainterPath()
-    dome.moveTo(-41, 0)
-    dome.lineTo(-41, -17)
-    dome.cubicTo(-40, -35, -27, -47, -3, -54)
-    dome.cubicTo(20, -47, 33, -34, 35, -17)
-    dome.lineTo(35, 0)
-    dome.closeSubpath()
-    p.drawPath(dome)
-    p.drawLine(-2, -54, -2, -71)
-    p.drawEllipse(QRectF(-5, -76, 6, 6))
-    for xx in (-26, -5, 16):
-        p.drawArc(QRectF(xx, -20, 13, 20), 0, 180 * 16)
-    minaret = QPainterPath()
-    minaret.moveTo(43, 1)
-    minaret.lineTo(43, -68)
-    minaret.lineTo(40, -68)
-    minaret.lineTo(40, -72)
-    minaret.lineTo(53, -72)
-    minaret.lineTo(53, -68)
-    minaret.lineTo(50, -68)
-    minaret.lineTo(50, 1)
-    minaret.closeSubpath()
-    p.drawPath(minaret)
-    p.drawLine(39, -81, 54, -81)
-    p.drawLine(46, -81, 46, -98)
-    p.drawEllipse(QRectF(44, -103, 4, 4))
-    p.restore()
-
-
-def rosette_etching(p: QPainter, x: float, y: float, size: float = 44):
-    """Eightfold geometric gold filigree, masked by the parent panel."""
-    p.save()
-    p.translate(x, y)
-    p.setPen(QPen(c(GOLD, 40), 1.1))
-    p.setBrush(Qt.BrushStyle.NoBrush)
-    for angle in (0, 45, 90, 135):
-        p.save()
-        p.rotate(angle)
-        p.drawRect(QRectF(-size * .5, -size * .5, size, size))
-        p.restore()
-    p.drawEllipse(QRectF(-size * .51, -size * .51, size * 1.02, size * 1.02))
-    p.drawEllipse(QRectF(-size * .33, -size * .33, size * .66, size * .66))
-    p.restore()
+def control_icon(kind):
+    pix = QPixmap(40, 40)
+    pix.fill(Qt.GlobalColor.transparent)
+    pix.setDevicePixelRatio(2)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(QPen(c("#D4C4A8"), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    if kind == "close":
+        p.drawLine(5, 5, 15, 15)
+        p.drawLine(15, 5, 5, 15)
+    elif kind == "edit":
+        p.drawLine(5, 14, 13, 6)
+        p.drawLine(7, 16, 15, 8)
+        p.drawLine(13, 6, 15, 8)
+        p.drawLine(5, 14, 4, 17)
+        p.drawLine(4, 17, 7, 16)
+        p.drawLine(11, 8, 13, 10)
+    elif kind == "refresh":
+        p.drawArc(QRectF(4, 4, 12, 12), 35 * 16, 290 * 16)
+        p.drawLine(15, 3, 16, 7)
+        p.drawLine(16, 7, 12, 6)
+    else:
+        p.drawEllipse(QRectF(5, 5, 10, 10))
+        p.drawEllipse(QRectF(8, 8, 4, 4))
+        for i in range(8):
+            a = i * math.pi / 4
+            p.drawLine(
+                round(10 + math.cos(a) * 6),
+                round(10 + math.sin(a) * 6),
+                round(10 + math.cos(a) * 8),
+                round(10 + math.sin(a) * 8),
+            )
+    p.end()
+    return QIcon(pix)
 
 
-def current_palette(name: str):
-    if name == "emerald":
-        return {"panel": "#102B2A", "row": "#1A3B39", "halo": "#245B4F", "accent": "#60E6C7"}
-    if name == "sand":
-        return {"panel": "#312923", "row": "#40342A", "halo": "#70543F", "accent": "#E8B872"}
-    return {"panel": "#161D24", "row": "#203137", "halo": "#1F4F51", "accent": TEAL}
+def label(text, name=None):
+    widget = QLabel(text)
+    widget.setTextFormat(Qt.TextFormat.PlainText)
+    if name:
+        widget.setObjectName(name)
+    return widget
 
 
-class SettingsDialog(QDialog):
-    def __init__(self, config: dict, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("NamazFlow · Einstellungen")
-        self.setMinimumWidth(390)
-        self.setStyleSheet("""
-          QDialog { background:#182127; color:#F6F1E9; }
-          QLabel, QCheckBox { color:#EDE5D8; font:12px 'Segoe UI'; }
-          QLineEdit, QComboBox { padding:9px; background:#26343B;
-            border:1px solid #465157; border-radius:7px; color:white; }
-          QPushButton { background:#267267; color:white; padding:10px;
-            border-radius:7px; min-width:82px; }
-        """)
+def button(text, tooltip, callback):
+    widget = QPushButton(text)
+    widget.setCursor(Qt.CursorShape.PointingHandCursor)
+    widget.setToolTip(tooltip)
+    widget.setAccessibleName(tooltip)
+    widget.clicked.connect(callback)
+    return widget
+
+
+class PrayerRow(QWidget):
+    def __init__(self, owner, prayer):
+        super().__init__()
+        self.owner, self.prayer = owner, prayer
+        self.active, self.hover = False, 0.0
+        self.animation = QVariantAnimation(self)
+        self.animation.setDuration(160)
+        self.animation.valueChanged.connect(self._hover_value)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 6, 8, 6)
+        row.setSpacing(8)
+        self.detail = button(
+            LABELS[prayer],
+            f"Gebetszeit {LABELS[prayer]}",
+            lambda: owner.show_detail(prayer),
+        )
+        self.detail.setStyleSheet(
+            "QPushButton { border:none; text-align:left; padding:3px; background:transparent; }"
+        )
+        self.detail.setMinimumHeight(30)
+        self.detail.setIconSize(QSize(26, 26))
+        row.addWidget(self.detail, 1)
+        self.time = label("–:–")
+        self.time.setFont(font(12, 500))
+        self.time.setMinimumWidth(52)
+        self.time.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        row.addWidget(self.time)
+        self.edit = button(
+            "", f"Symbol für {LABELS[prayer]} ändern", lambda: owner.edit_icon(prayer)
+        )
+        self.edit.setIcon(control_icon("edit"))
+        self.edit.setFixedSize(32, 32)
+        row.addWidget(self.edit)
+
+    def _hover_value(self, value):
+        self.hover = float(value)
+        self.update()
+
+    def _animate(self, value):
+        self.animation.stop()
+        if not self.owner.settings["animations"]:
+            self._hover_value(value)
+            return
+        self.animation.setStartValue(self.hover)
+        self.animation.setEndValue(value)
+        self.animation.start()
+
+    def enterEvent(self, event):
+        self._animate(1.0)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._animate(0.0)
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        colors = current_palette(self.owner.settings["theme"])
+        if self.active or self.hover:
+            round_rect(
+                p,
+                QRectF(self.rect()).adjusted(1, 1, -1, -1),
+                11,
+                c(colors["row"], 215 if self.active else int(150 * self.hover)),
+                c(colors["accent"], 160 if self.active else int(70 * self.hover)),
+            )
+        else:
+            p.setPen(QPen(c("#718080", 35), 1))
+            p.drawLine(10, self.height() - 1, self.width() - 10, self.height() - 1)
+        p.end()
+
+
+class CountdownCard(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("countdownCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.setStyleSheet(
+            "#countdownCard {background:#203D3B; border:1px solid #467A6B; border-radius:14px;}"
+        )
         layout = QVBoxLayout(self)
-        title = QLabel("Gebetszeiten & Erscheinungsbild")
-        title.setStyleSheet("font: 600 19px 'Segoe UI'; color:#DBAE67; margin-bottom:10px;")
-        layout.addWidget(title)
-        form = QFormLayout()
-        self.city = QLineEdit(config["city"])
-        self.country = QLineEdit(config["country"])
-        self.method = QComboBox()
-        for key, value in METHODS.items():
-            self.method.addItem(value, key)
-        self.method.setCurrentIndex(max(0, self.method.findData(config["method"])))
-        self.school = QComboBox()
-        self.school.addItem("Hanafi", 1)
-        self.school.addItem("Shafi / Standard", 0)
-        self.school.setCurrentIndex(max(0, self.school.findData(config["school"])))
-        self.theme = QComboBox()
-        for value, label in (("midnight", "Mitternacht · Gold & Türkis"),
-                             ("emerald", "Smaragd"), ("sand", "Sand & Bronze")):
-            self.theme.addItem(label, value)
-        self.theme.setCurrentIndex(max(0, self.theme.findData(config["theme"])))
-        self.symbol = QComboBox()
-        for value, label in (("crescent", "Halbmond"), ("mosque", "Moschee"),
-                             ("star", "Stern"), ("lantern", "Laterne")):
-            self.symbol.addItem(label, value)
-        self.symbol.setCurrentIndex(max(0, self.symbol.findData(config["symbol"])))
-        form.addRow("Stadt", self.city)
-        form.addRow("Land (Englisch)", self.country)
-        form.addRow("Berechnungsmethode", self.method)
-        form.addRow("Asr-Rechtsschule", self.school)
-        form.addRow("Design", self.theme)
-        form.addRow("Schwebendes Symbol", self.symbol)
-        layout.addLayout(form)
-        self.notifications = QCheckBox("Dezente Gebetsbenachrichtigungen")
-        self.notifications.setChecked(config["notifications"])
-        self.autostart = QCheckBox("Mit Windows starten")
-        self.autostart.setChecked(config["autostart"])
-        self.quote = QCheckBox("Erinnerungsvers anzeigen")
-        self.quote.setChecked(config["quote"])
-        layout.addWidget(self.notifications)
-        layout.addWidget(self.autostart)
-        layout.addWidget(self.quote)
-        note = QLabel("Zeiten können je nach Berechnungsmethode von deiner Moschee abweichen.")
-        note.setWordWrap(True)
-        note.setStyleSheet("color:#B0B7BB; font-size:10px; margin:10px 0;")
-        layout.addWidget(note)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        layout.setContentsMargins(18, 12, 18, 14)
+        layout.setSpacing(3)
+        self.heading = label("NÄCHSTES GEBET", "eyebrow")
+        self.time = label("–")
+        self.time.setStyleSheet("font:28px 'Georgia'; color:#74E5CD;")
+        self.next = label("Gebetszeiten werden geladen …", "muted")
+        self.next.setWordWrap(True)
+        for part in (self.heading, self.time, self.next):
+            layout.addWidget(part)
 
-    def values(self) -> dict:
-        return {
-            "city": self.city.text().strip(),
-            "country": self.country.text().strip(),
-            "method": self.method.currentData(),
-            "school": self.school.currentData(),
-            "theme": self.theme.currentData(),
-            "symbol": self.symbol.currentData(),
-            "notifications": self.notifications.isChecked(),
-            "autostart": self.autostart.isChecked(),
-            "quote": self.quote.isChecked(),
-        }
+
+class PrayerPanel(QWidget):
+    def __init__(self, owner):
+        super().__init__(
+            owner,
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint,
+        )
+        self.owner = owner
+        self.setWindowTitle("NamazFlow · Gebetszeiten")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setStyleSheet(STYLE)
+        self.setFixedWidth(416)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 10, 10, 10)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer.addWidget(self.scroll)
+        self.content = QWidget()
+        self.content.setObjectName("panelContent")
+        self.content.setStyleSheet("#panelContent { background:transparent; }")
+        layout = QVBoxLayout(self.content)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(9)
+        header = QHBoxLayout()
+        header.addWidget(label("NAMAZFLOW", "eyebrow"), 1)
+        self.gear = button("", "Einstellungen öffnen", owner.configure)
+        self.close_button = button("", "Menü einklappen (Esc)", owner.collapse)
+        self.gear.setIcon(control_icon("settings"))
+        self.close_button.setIcon(control_icon("close"))
+        self.gear.setFixedSize(32, 32)
+        self.close_button.setFixedSize(32, 32)
+        header.addWidget(self.gear)
+        header.addWidget(self.close_button)
+        layout.addLayout(header)
+        layout.addWidget(label("Deine Gebetszeiten", "title"))
+        self.city = QComboBox()
+        self.city.setAccessibleName("Standort wechseln")
+        for key, place in LOCATIONS.items():
+            self.city.addItem(place["label"], key)
+        self.city.currentIndexChanged.connect(
+            lambda index: owner.switch_location(self.city.itemData(index))
+        )
+        layout.addWidget(self.city)
+        self.date, self.hijri = label("", "muted"), label("", "muted")
+        layout.addWidget(self.date)
+        layout.addWidget(self.hijri)
+        rows = QVBoxLayout()
+        rows.setSpacing(4)
+        self.rows = {}
+        for prayer in PRAYERS:
+            row = PrayerRow(owner, prayer)
+            self.rows[prayer] = row
+            rows.addWidget(row)
+        layout.addLayout(rows)
+        self.countdown = CountdownCard()
+        layout.addWidget(self.countdown)
+        self.quote_box = QWidget()
+        quote_layout = QVBoxLayout(self.quote_box)
+        quote_layout.setContentsMargins(0, 2, 0, 0)
+        quote_layout.setSpacing(8)
+        quote_header = QHBoxLayout()
+        self.quote_heading = label("MOMENT DER BESINNUNG", "eyebrow")
+        quote_header.addWidget(self.quote_heading, 1)
+        self.next_quote = button("", "Nächstes Zitat laden", owner.next_quote)
+        self.next_quote.setIcon(control_icon("refresh"))
+        self.next_quote.setFixedSize(30, 30)
+        quote_header.addWidget(self.next_quote)
+        quote_layout.addLayout(quote_header)
+        self.quote_text = label("Zitat wird geladen …")
+        self.quote_text.setStyleSheet("font:italic 14px 'Georgia'; color:#E5C795;")
+        self.quote_text.setWordWrap(True)
+        self.quote_text.setMinimumHeight(44)
+        self.quote_text.setMaximumHeight(84)
+        quote_layout.addWidget(self.quote_text)
+        self.quote_ref = label("", "muted")
+        self.quote_ref.setWordWrap(True)
+        quote_layout.addWidget(self.quote_ref)
+        self.quote_detail = button(
+            "Zitat & Quelle ansehen",
+            "Vollständiges Zitat mit Quellenangabe",
+            owner.show_quote,
+        )
+        self.quote_detail.setEnabled(False)
+        quote_layout.addWidget(self.quote_detail)
+        layout.addWidget(self.quote_box)
+        self.status = label("", "muted")
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        self.scroll.setWidget(self.content)
+        self.animation = QParallelAnimationGroup(self)
+        self.fade = QPropertyAnimation(self, b"windowOpacity")
+        self.slide = QPropertyAnimation(self, b"pos")
+        for anim in (self.fade, self.slide):
+            anim.setDuration(210)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self.animation.addAnimation(anim)
+        self.sync_city()
+
+    def sync_city(self):
+        self.city.blockSignals(True)
+        while self.city.count() > len(LOCATIONS):
+            self.city.removeItem(self.city.count() - 1)
+        key = self.owner.settings["location"]
+        if key:
+            self.city.setCurrentIndex(self.city.findData(key))
+        elif self.owner.settings["city"].casefold() == "darmstadt":
+            self.city.setCurrentIndex(0)
+        else:
+            self.city.addItem(self.owner.settings["city"], "")
+            self.city.setCurrentIndex(self.city.count() - 1)
+        self.city.blockSignals(False)
+
+    def open(self):
+        self.animation.stop()
+        screen = (
+            QApplication.screenAt(self.owner.geometry().center())
+            or QApplication.primaryScreen()
+        )
+        self.setFixedHeight(min(788, screen.availableGeometry().height() - 24))
+        end = self.owner.panel_position()
+        animate = (
+            self.owner.settings["animations"]
+            and QApplication.platformName() != "offscreen"
+        )
+        self.move(end + QPoint(0, 10) if animate else end)
+        self.setWindowOpacity(0.0 if animate else 1.0)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if animate:
+            self.fade.setStartValue(0.0)
+            self.fade.setEndValue(1.0)
+            self.slide.setStartValue(self.pos())
+            self.slide.setEndValue(end)
+            self.animation.start()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.owner.collapse()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        self.owner.collapse()
+        event.ignore()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        colors = current_palette(self.owner.settings["theme"])
+        rect = QRectF(self.rect()).adjusted(6, 6, -6, -6)
+        for d, alpha in ((5, 12), (3, 22)):
+            round_rect(p, rect.translated(0, d), 22, c("#000000", alpha))
+        grad = QLinearGradient(0, 0, self.width(), self.height())
+        grad.setColorAt(0, c(colors["panel"], 251))
+        grad.setColorAt(1, c("#182322", 252))
+        round_rect(p, rect, 22, QBrush(grad), c(GOLD, 105), 1)
+        clip = QPainterPath()
+        clip.addRoundedRect(rect, 22, 22)
+        p.setClipPath(clip)
+        rosette_etching(p, self.width() - 22, self.height() - 38, 65)
+        p.end()
 
 
 class NamazWidget(QWidget):
     loaded = Signal(object, str, int)
-    COLLAPSED = (108, 108)
-    EXPANDED = (577, 657)
-    PANEL_DX, PANEL_DY = 111, -72
+    quote_loaded = Signal(object, str, int)
+    COLLAPSED = (128, 128)
 
     def __init__(self):
-        super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
-                         Qt.WindowType.WindowStaysOnTopHint)
+        super().__init__(
+            None,
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint,
+        )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle("NamazFlow")
+        self.setStyleSheet(STYLE)
+        self.setFixedSize(*self.COLLAPSED)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.settings = load()
         self.days = []
         self.error = "Gebetszeiten werden geladen …"
-        self.online = False
-        self.expanded = False
+        self.online = self.expanded = False
         self._drag_start = None
-        self._was_dragged = False
+        self._was_dragged = self._loading = False
         self._generation = 0
+        self._last_day = self._last_notification = None
         self._last_refresh = datetime.now()
-        self._last_day = None
-        self._loading = False
-        self._last_notification = None
         self._demo = False
+        self.quote = None
+        self.quote_error = ""
+        self._quote_index = datetime.now().date().toordinal() % 12
+        self._quote_generation = 0
+        self._quote_loading = False
+        self._phase = self._hover = 0.0
+        self.hover_animation = QVariantAnimation(self)
+        self.hover_animation.setDuration(180)
+        self.hover_animation.valueChanged.connect(self._hover_value)
         self.loaded.connect(self._received)
+        self.quote_loaded.connect(self._quote_received)
+        self.panel = PrayerPanel(self)
         self._icon = self.make_icon()
+        self.setWindowIcon(self._icon)
+        self.panel.setWindowIcon(self._icon)
         self.tray = QSystemTrayIcon(self._icon, self)
         self.tray.setToolTip("NamazFlow · Gebetszeiten")
-        self.tray.activated.connect(lambda reason: self.toggle() if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
-        self.tray_menu = self.menu()
-        self.tray.setContextMenu(self.tray_menu)
+        self.tray.activated.connect(self._tray_activated)
+        self._tray_menu = self.menu()
+        self.tray.setContextMenu(self._tray_menu)
         self.tray.show()
-        self.resize(*self.COLLAPSED)
         screen = QApplication.primaryScreen().availableGeometry()
-        x = self.settings["x"] if self.settings["x"] is not None else screen.right() - 135
+        x = (
+            self.settings["x"]
+            if self.settings["x"] is not None
+            else screen.right() - 155
+        )
         y = self.settings["y"] if self.settings["y"] is not None else screen.top() + 55
-        self.move(max(screen.left(), min(int(x), screen.right() - 108)),
-                  max(screen.top(), min(int(y), screen.bottom() - 108)))
+        self.move(self.clamped_position(QPoint(int(x), int(y))))
         self.tick = QTimer(self)
         self.tick.timeout.connect(self._tick)
         self.tick.start(1000)
+        self.motion = QTimer(self)
+        self.motion.timeout.connect(self._motion_tick)
+        self.motion.start(40)
+        self.quote_timer = QTimer(self)
+        self.quote_timer.timeout.connect(self.next_quote)
+        self.quote_timer.start(5 * 60 * 1000)
         self.refresh()
+        if self.settings["quote"]:
+            self.load_quote()
 
-    def make_icon(self) -> QIcon:
-        icon = QPixmap(64, 64)
-        icon.fill(Qt.GlobalColor.transparent)
-        p = QPainter(icon)
+    def make_icon(self):
+        pix = QPixmap(128, 128)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(c("#16252A"))
         p.setPen(QPen(c(GOLD), 2))
-        p.drawEllipse(QRectF(3, 3, 58, 58))
-        draw_symbol(p, self.settings.get("symbol", "crescent"), 32, 32, 39, GOLD)
+        p.setBrush(c("#182D32"))
+        p.drawEllipse(QRectF(5, 5, 118, 118))
+        p.setPen(QPen(c(TEAL), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawArc(QRectF(9, 9, 110, 110), 90 * 16, -125 * 16)
+        draw_symbol(p, self.settings["symbol"], 61, 63, 66, GOLD)
         p.end()
-        return QIcon(icon)
+        return QIcon(pix)
 
     def menu(self):
-        menu = QMenu()
-        menu.addAction("Gebetszeiten anzeigen", self.toggle)
+        menu = QMenu(self)
+        menu.addAction("Gebetszeiten öffnen", self.open_panel)
+        menu.addAction("Menü einklappen", self.collapse)
+        menu.addAction("Flow ausblenden", self.hide_flow)
+        menu.addAction("Flow wieder anzeigen", self.show_flow)
+        places = menu.addMenu("Standort wechseln")
+        for key, place in LOCATIONS.items():
+            action = places.addAction(place["label"])
+            action.setCheckable(True)
+            action.setChecked(self.settings["location"] == key)
+            action.triggered.connect(
+                lambda checked=False, key=key: self.switch_location(key)
+            )
+        menu.addSeparator()
         menu.addAction("Einstellungen", self.configure)
         menu.addAction("Zeiten aktualisieren", self.refresh)
         menu.addSeparator()
-        menu.addAction("NamazFlow beenden", QApplication.quit)
+        menu.addAction("NamazFlow beenden", self.quit_app)
         return menu
 
-    def toggle(self):
-        self.expanded = not self.expanded
-        if self.expanded:
-            screen = QApplication.screenAt(self.pos()) or QApplication.primaryScreen()
-            geo = screen.availableGeometry()
-            self.move(max(geo.left(), min(self.x(), geo.right() - self.EXPANDED[0] + 1)),
-                      max(geo.top(), min(self.y(), geo.bottom() - self.EXPANDED[1] + 1)))
-        self.setFixedSize(*(self.EXPANDED if self.expanded else self.COLLAPSED))
+    def quit_app(self):
+        # Window-manager close hides Flow; the explicit exit action must bypass it.
+        self.collapse()
+        self.hide()
+        self.tray.hide()
+        QApplication.exit(0)
+
+    def _tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            if not self.isVisible():
+                self.show_flow()
+            self.toggle()
+
+    def show_flow(self):
+        self.move(self.clamped_position(self.pos()))
+        self.show()
+        self.raise_()
+
+    def hide_flow(self):
+        self.collapse()
+        self.hide()
+
+    def open_panel(self):
+        self.show_flow()
+        self.expanded = True
+        self._render_state()
+        self.panel.open()
         self.update()
+
+    def collapse(self):
+        self.expanded = False
+        self.panel.animation.stop()
+        self.panel.hide()
+        self.panel.setWindowOpacity(1.0)
+        self.update()
+
+    def toggle(self):
+        self.collapse() if self.expanded else self.open_panel()
+
+    def clamped_position(self, point):
+        screen = (
+            QApplication.screenAt(point + QPoint(64, 64))
+            or self.screen()
+            or QApplication.primaryScreen()
+        )
+        geo = screen.availableGeometry()
+        return QPoint(
+            max(geo.left(), min(point.x(), geo.right() - self.width() + 1)),
+            max(geo.top(), min(point.y(), geo.bottom() - self.height() + 1)),
+        )
+
+    def panel_position(self):
+        screen = (
+            QApplication.screenAt(self.geometry().center())
+            or QApplication.primaryScreen()
+        )
+        geo = screen.availableGeometry()
+        right, left = self.x() + self.width() + 8, self.x() - self.panel.width() - 8
+        x = right if right + self.panel.width() <= geo.right() + 1 else left
+        return QPoint(
+            max(geo.left(), min(x, geo.right() - self.panel.width() + 1)),
+            max(geo.top(), min(self.y(), geo.bottom() - self.panel.height() + 1)),
+        )
+
+    def moveEvent(self, event):
+        if hasattr(self, "panel") and self.panel.isVisible():
+            self.panel.animation.stop()
+            self.panel.setWindowOpacity(1.0)
+            self.panel.move(self.panel_position())
+        super().moveEvent(event)
 
     def refresh(self):
         self._generation += 1
-        generation = self._generation
-        config = dict(self.settings)
-        self._last_refresh = datetime.now()
+        generation, config = self._generation, dict(self.settings)
         self._loading = True
-        self.error = "Aktualisiere Gebetszeiten …" if not self.days else self.error
-        self.update()
+        self._last_refresh = datetime.now()
+        self._render_state()
+
         def task():
-            days = []
-            errors = []
-            # Get three days so countdown works before Fajr and after Isha.
-            now = datetime.now()
-            for offset in (-1, 0, 1):
+            days, errors = [], []
+            today = datetime.now(ZoneInfo("Europe/Berlin")).date()
+            if config["time_source"] == "ditib":
                 try:
-                    days.append(get_day(now.date() + timedelta(days=offset), config, data_path() / "cache"))
+                    calendar = get_calendar(config, data_path() / "cache")
+                    days = [
+                        day for day in calendar if -1 <= (day.day - today).days <= 1
+                    ]
                 except (ConnectionError, ValueError) as exc:
                     errors.append(str(exc))
-            message = "; ".join(errors) if errors else ""
-            self.loaded.emit(days, message, generation)
+            else:
+                for offset in (-1, 0, 1):
+                    try:
+                        days.append(
+                            get_day(
+                                today + timedelta(days=offset),
+                                config,
+                                data_path() / "cache",
+                            )
+                        )
+                    except (ConnectionError, ValueError) as exc:
+                        errors.append(str(exc))
+            self.loaded.emit(days, "; ".join(errors), generation)
+
         threading.Thread(target=task, daemon=True).start()
 
-    def _received(self, days, error: str, generation: int):
+    def _received(self, days, error, generation):
         if generation != self._generation:
             return
-        self.days = days
-        self._loading = False
-        self.error = error
-        self.online = any(not x.cached for x in days)
+        self.days, self.error, self._loading = days, error, False
+        self.online = any(not day.cached for day in days)
         self._last_day = self._now().date()
-        if not days:
-            self.error = error or "Keine gültigen Gebetszeiten verfügbar."
-        self.update()
-
-    def _zone(self):
-        return ZoneInfo(self.days[0].timezone) if self.days else datetime.now().astimezone().tzinfo
+        self._render_state()
 
     def _now(self):
-        return datetime.now(self._zone())
+        return datetime.now(
+            ZoneInfo(self.days[0].timezone if self.days else "Europe/Berlin")
+        )
 
     def _today(self):
-        today = self._now().date()
-        return next((d for d in self.days if d.day == today), None)
+        return next((day for day in self.days if day.day == self._now().date()), None)
 
     def _next(self):
         return next_prayer(self._now(), self.days) if self.days else None
 
     def _tick(self):
         now = self._now()
-        if not self._loading and (self._last_day != now.date() or (datetime.now() - self._last_refresh).total_seconds() > 1800):
+        if not self._loading and (
+            self._last_day != now.date()
+            or (datetime.now() - self._last_refresh).total_seconds() > 1800
+        ):
             self.refresh()
-        upcoming = self._next()
-        if upcoming and self.settings["notifications"] and not self._demo:
-            name, when, remaining, _ = upcoming
-            # Notify only when a prayer actually begins; next_prayer has already rolled on.
-            events = [(n, dt) for day in self.days for n, dt in day.times.items()]
-            for prayer, dt in events:
-                elapsed = (now.astimezone(ZoneInfo("UTC")) - dt.astimezone(ZoneInfo("UTC"))).total_seconds()
-                marker = f"{dt.date()}:{prayer}"
-                if 0 <= elapsed < 2 and marker != self._last_notification:
-                    self._last_notification = marker
-                    self.tray.showMessage("NamazFlow", f"Zeit für {prayer} · {dt:%H:%M}", QSystemTrayIcon.MessageIcon.Information, 9000)
-                    break
+        if self.settings["notifications"] and not self._demo:
+            for day in self.days:
+                for prayer, moment in day.times.items():
+                    elapsed = (
+                        now.astimezone(ZoneInfo("UTC"))
+                        - moment.astimezone(ZoneInfo("UTC"))
+                    ).total_seconds()
+                    marker = f"{moment.date()}:{prayer}"
+                    if 0 <= elapsed < 2 and marker != self._last_notification:
+                        self._last_notification = marker
+                        self.tray.showMessage(
+                            "NamazFlow",
+                            f"Zeit für {LABELS[prayer]} · {moment:%H:%M}",
+                            QSystemTrayIcon.MessageIcon.Information,
+                            9000,
+                        )
+        self._render_state()
+
+    def _motion_tick(self):
+        if self.settings["animations"] and self.isVisible():
+            self._phase += 0.045
+            self.update()
+
+    def _hover_value(self, value):
+        self._hover = float(value)
         self.update()
 
+    def _animate_hover(self, value):
+        self.hover_animation.stop()
+        if not self.settings["animations"]:
+            self._hover_value(value)
+            return
+        self.hover_animation.setStartValue(self._hover)
+        self.hover_animation.setEndValue(value)
+        self.hover_animation.start()
+
+    def enterEvent(self, event):
+        self._animate_hover(1.0)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._animate_hover(0.0)
+        super().leaveEvent(event)
+
+    def _render_state(self):
+        if not hasattr(self, "panel"):
+            return
+        panel = self.panel
+        today, now, upcoming = self._today(), self._now(), self._next()
+        panel.date.setText(
+            f"{WEEKDAYS[now.weekday()]}, {now.day}. {MONTHS[now.month - 1]} {now.year}"
+        )
+        panel.hijri.setText(
+            f"{today.hijri} H"
+            if today and today.hijri
+            else "Islamisches Datum nicht verfügbar"
+        )
+        active = current_prayer(now, self.days) if self.days else None
+        accent = current_palette(self.settings["theme"])["accent"]
+        for prayer, row in panel.rows.items():
+            row.active = prayer == active
+            row.time.setText(today.times[prayer].strftime("%H:%M") if today else "–:–")
+            row.detail.setIcon(
+                icon_for(
+                    self.settings["icons"].get(prayer, DEFAULT_ICONS[prayer]),
+                    color=accent if row.active else GOLD,
+                )
+            )
+            row.time.setStyleSheet(f"color:{accent if row.active else WHITE};")
+            row.update()
+        if upcoming:
+            hours, rest = divmod(upcoming[2], 3600)
+            minutes = rest // 60
+            duration = (
+                f"{hours} Std. {minutes:02d} Min."
+                if hours
+                else f"{minutes} Min. {rest % 60:02d} Sek."
+            )
+            panel.countdown.time.setText(duration)
+            panel.countdown.next.setText(
+                f"bis {LABELS[upcoming[0]]} · {upcoming[1]:%H:%M} Uhr"
+            )
+            self.setToolTip(
+                f"{location_label(self.settings)}\nNoch {duration} bis {LABELS[upcoming[0]]} ({upcoming[1]:%H:%M} Uhr)\nZiehen: verschieben · Klick: Gebetszeiten · Rechtsklick: Menü"
+            )
+        else:
+            panel.countdown.time.setText("–")
+            panel.countdown.next.setText(
+                "Gebetszeiten werden geladen …"
+                if self._loading
+                else "Keine aktuellen Gebetszeiten verfügbar"
+            )
+            self.setToolTip(
+                "NamazFlow\nZiehen: verschieben · Klick: Gebetszeiten · Rechtsklick: Menü"
+            )
+        panel.quote_box.setVisible(self.settings["quote"])
+        if self._loading:
+            panel.status.setText("Gebetszeiten werden aktualisiert …")
+        elif not today:
+            panel.status.setText(
+                "Keine aktuellen Zeiten. Verbindung prüfen oder erneut aktualisieren."
+            )
+        elif self.error:
+            panel.status.setText(
+                "Zeiten teilweise verfügbar · Aktualisierung später erneut versuchen."
+            )
+        else:
+            panel.status.setText(
+                f"Gespeichert · {today.source}"
+                if today.cached
+                else f"Aktuell · {today.source}"
+            )
+        panel.status.setToolTip(self.error)
+        self.update()
+
+    def switch_location(self, key):
+        if key not in LOCATIONS or self.settings["location"] == key:
+            return
+        preset = LOCATIONS[key]
+        self.settings.update(
+            location=key, city=preset["city"], country=preset["country"]
+        )
+        save(self.settings)
+        self.days = []
+        self.panel.sync_city()
+        self._rebuild_menu()
+        self.refresh()
+
+    def _rebuild_menu(self):
+        old = self._tray_menu
+        self._tray_menu = self.menu()
+        self.tray.setContextMenu(self._tray_menu)
+        old.deleteLater()
+
     def configure(self):
+        self.collapse()
         dialog = SettingsDialog(self.settings, self)
+        dialog.setWindowIcon(self._icon)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         changes = dialog.values()
@@ -426,239 +839,263 @@ class NamazWidget(QWidget):
             return
         previous = self.settings.copy()
         self.settings.update(changes)
-        try:
-            set_windows_autostart(self.settings["autostart"])
-        except OSError as exc:
-            self.settings["autostart"] = previous["autostart"]
-            QMessageBox.warning(self, "Autostart", f"Windows-Autostart konnte nicht geändert werden: {exc}")
+        if previous["autostart"] != changes["autostart"]:
+            try:
+                set_windows_autostart(changes["autostart"])
+            except OSError as exc:
+                self.settings["autostart"] = previous["autostart"]
+                QMessageBox.warning(self, "Autostart", str(exc))
         save(self.settings)
         self._icon = self.make_icon()
+        self.setWindowIcon(self._icon)
         self.tray.setIcon(self._icon)
-        self.tray.setContextMenu(self.menu())
-        self.update()
-        if any(previous[k] != self.settings[k] for k in ("city", "country", "method", "school")):
+        self.panel.sync_city()
+        self._rebuild_menu()
+        if any(
+            previous[k] != self.settings[k]
+            for k in ("city", "country", "location", "time_source", "method", "school")
+        ):
             self.days = []
             self.refresh()
+        if previous["quote_source"] != self.settings["quote_source"]:
+            self.quote = None
+            self._quote_generation += 1
+            self._quote_loading = False
+        if self.settings["quote"] and (not self.quote or not previous["quote"]):
+            self.load_quote()
+        self.open_panel()
 
     def edit_icon(self, prayer):
-        current = self.settings.get("icons", DEFAULT_ICONS).get(prayer, DEFAULT_ICONS[prayer])
-        chosen, accepted = QInputDialog.getItem(self, f"{prayer} · Symbol", "Symbol auswählen",
-                                                 list(ICONS), list(ICONS).index(current), False)
+        current = self.settings["icons"].get(prayer, DEFAULT_ICONS[prayer])
+        chosen, accepted = QInputDialog.getItem(
+            self.panel,
+            f"{LABELS[prayer]} · Symbol",
+            "Symbol auswählen",
+            list(ICON_LABELS),
+            ICONS.index(current),
+            False,
+        )
         if accepted:
-            self.settings.setdefault("icons", DEFAULT_ICONS.copy())[prayer] = chosen
+            self.settings["icons"][prayer] = ICONS[ICON_LABELS.index(chosen)]
             save(self.settings)
-            self.update()
+            self._render_state()
+
+    def load_quote(self):
+        if self._quote_loading or not self.settings["quote"]:
+            return
+        self._quote_generation += 1
+        generation = self._quote_generation
+        index, source = self._quote_index, self.settings["quote_source"]
+        self._quote_loading = True
+        self.panel.next_quote.setEnabled(False)
+        if self.quote is None:
+            self.panel.quote_text.setText("Zitat wird geladen …")
+            self.panel.quote_ref.setText("")
+            self.panel.quote_detail.setEnabled(False)
+
+        def task():
+            try:
+                quote = get_quote(index, data_path() / "quotes", source)
+                self.quote_loaded.emit(quote, "", generation)
+            except ConnectionError as exc:
+                self.quote_loaded.emit(None, str(exc), generation)
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def next_quote(self):
+        if not self._quote_loading:
+            self._quote_index += 1
+            self.load_quote()
+
+    def _quote_received(self, quote, error, generation):
+        if generation != self._quote_generation:
+            return
+        self._quote_loading, self.quote_error = False, error
+        self.panel.next_quote.setEnabled(True)
+        if quote:
+            self.quote = quote
+        if self.quote:
+            text = self.quote.text
+            # Preview is marked with ellipsis; detail preserves the full source text.
+            if len(text) > 165:
+                text = text[:162].rsplit(" ", 1)[0] + " …"
+            self.panel.quote_text.setText(text)
+            self.panel.quote_heading.setText(
+                "KORAN · ÜBERSETZUNG"
+                if self.quote.kind == "quran"
+                else "HADITH · ÜBERSETZUNG"
+            )
+            suffix = " · gespeichert" if self.quote.cached else ""
+            if error:
+                suffix += " · Aktualisierung fehlgeschlagen"
+            self.panel.quote_ref.setText(
+                f"{self.quote.reference}\n{self.quote.publisher}{suffix}"
+            )
+            self.panel.quote_ref.setToolTip(error)
+        else:
+            self.panel.quote_text.setText(error or "Zitat derzeit nicht verfügbar.")
+            self.panel.quote_ref.setText("Mit ↻ erneut versuchen.")
+        self.panel.quote_detail.setEnabled(self.quote is not None)
+
+    def show_quote(self):
+        if not self.quote:
+            return
+        quote = self.quote
+        dialog = QDialog(self.panel)
+        dialog.setWindowTitle("NamazFlow · Zitat & Quelle")
+        dialog.setStyleSheet("QDialog { background:#18272B; }" + STYLE)
+        dialog.resize(480, 430)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(22, 22, 22, 22)
+        layout.setSpacing(14)
+        layout.addWidget(
+            label(
+                "Koran · Übersetzung"
+                if quote.kind == "quran"
+                else "Hadith · Übersetzung",
+                "eyebrow",
+            )
+        )
+        text = QTextBrowser()
+        source_text = quote.text
+        if quote.original_attribution:
+            source_text += (
+                "\n\nOriginal-Quellenangabe des Anbieters:\n"
+                + quote.original_attribution
+            )
+        text.setPlainText(source_text)
+        text.setStyleSheet(
+            "background:#203236; color:#EDD5AD; border:0; padding:12px; font:16px 'Georgia';"
+        )
+        layout.addWidget(text, 1)
+        attribution = label(f"{quote.reference}\n{quote.publisher}", "muted")
+        attribution.setWordWrap(True)
+        layout.addWidget(attribution)
+        layout.addWidget(
+            button(
+                "Quelle im Browser öffnen",
+                "Originalquelle öffnen",
+                lambda: QDesktopServices.openUrl(QUrl(quote.url)),
+            )
+        )
+        layout.addWidget(button("Schließen", "Zitat schließen", dialog.accept))
+        dialog.exec()
+
+    def show_detail(self, prayer):
+        today = self._today()
+        value = (
+            today.times[prayer].strftime("%H:%M") + " Uhr"
+            if today
+            else "Keine aktuelle Zeit verfügbar"
+        )
+        source = today.source if today else "Keine gültigen Daten"
+        sunrise = (
+            f"\nSabah beginnt mit İmsak. Güneş (Sonnenaufgang): {today.sunrise:%H:%M} Uhr"
+            if today and today.sunrise and prayer == "Fajr"
+            else ""
+        )
+        QMessageBox.information(
+            self.panel,
+            f"NamazFlow · {LABELS[prayer]}",
+            f"{LABELS[prayer]} · {value}\n{location_label(self.settings)}\n\nQuelle: {source}{sunrise}",
+        )
 
     def contextMenuEvent(self, event):
-        self.menu().exec(event.globalPos())
+        self._context_menu = self.menu()
+        self._context_menu.exec(event.globalPos())
+        self._context_menu.deleteLater()
 
     def mousePressEvent(self, event):
-        if event.button() != Qt.MouseButton.LeftButton:
-            return
-        pt = event.position()
-        if QRectF(12, 5, 100, 102).contains(pt):
+        if event.button() == Qt.MouseButton.LeftButton:
             self._drag_start = (event.globalPosition().toPoint(), self.pos())
             self._was_dragged = False
-        event.accept()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if not self._drag_start or not (event.buttons() & Qt.MouseButton.LeftButton):
-            return
-        global_start, origin = self._drag_start
-        delta = event.globalPosition().toPoint() - global_start
-        if delta.manhattanLength() > 5:
-            self._was_dragged = True
-            self.move(origin + delta)
-        event.accept()
+        if self._drag_start and event.buttons() & Qt.MouseButton.LeftButton:
+            start, origin = self._drag_start
+            delta = event.globalPosition().toPoint() - start
+            if delta.manhattanLength() >= QApplication.startDragDistance():
+                self._was_dragged = True
+            if self._was_dragged:
+                self.move(self.clamped_position(origin + delta))
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() != Qt.MouseButton.LeftButton:
-            return
-        pt = event.position()
-        if self._drag_start:
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_start:
             self._drag_start = None
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
             if self._was_dragged:
                 self.settings.update(x=self.x(), y=self.y())
                 save(self.settings)
-                return
-            self.toggle()
-            return
-        if not self.expanded:
-            return
-        pt = pt - QPointF(self.PANEL_DX, self.PANEL_DY)
-        if QRectF(364, 124, 37, 32).contains(pt):
-            self.configure()
-        elif QRectF(402, 124, 30, 32).contains(pt):
-            self.toggle()
-        elif QRectF(33, 246, 405, 257).contains(pt):
-            index = int((pt.y() - 247) // 51)
-            if 0 <= index < 5:
-                if pt.x() >= 362:
-                    self.edit_icon(PRAYERS[index])
-                else:
-                    self.show_detail(PRAYERS[index])
-        elif QRectF(37, 630, 370, 65).contains(pt):
-            self.show_detail(current_prayer(self._now(), self.days) or "Asr")
+            else:
+                self.toggle()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
-    def show_detail(self, prayer):
-        desc = QUOTES.get(prayer, QUOTES["Asr"])
-        QMessageBox.information(self, f"NamazFlow · {prayer}",
-                                f"{prayer}\n\n{desc[0]}\n\n{desc[1]}")
-
-    def paintEvent(self, _event):
+    def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        color = current_palette(self.settings["theme"])
-        if self.expanded:
-            p.save()
-            p.translate(self.PANEL_DX, self.PANEL_DY)
-            self._draw_panel(p, color)
-            p.restore()
-            # A slim teal bridge ties the floating orb to the opened panel.
-            p.setPen(QPen(c(color["accent"], 95), 2))
-            p.drawLine(103, 55, 128, 55)
-        self._draw_orb(p, color)
-        p.end()
-
-    def _draw_orb(self, p, colors):
-        center_x = 60 if self.expanded else 54
-        center_y = 55 if self.expanded else 54
-        for r, alpha in ((49, 24), (46, 40), (43, 60)):
-            p.setPen(QPen(c(GOLD, alpha), 2))
+        colors = current_palette(self.settings["theme"])
+        center = 64
+        pulse = (math.sin(self._phase) + 1) / 2 if self.settings["animations"] else 0.25
+        for radius, alpha in ((59, 14),):
+            p.setPen(QPen(c(GOLD, int(alpha + self._hover * 20 + pulse * 4)), 1))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(QRectF(center_x-r, center_y-r, 2*r, 2*r))
-        gradient = QRadialGradient(center_x - 10, center_y - 15, 65)
-        gradient.setColorAt(0, c("#29424A"))
-        gradient.setColorAt(1, c("#111B22"))
-        p.setPen(QPen(c(GOLD, 185), 1.8))
-        p.setBrush(QBrush(gradient))
-        p.drawEllipse(QRectF(center_x-41, center_y-41, 82, 82))
+            p.drawEllipse(
+                QRectF(center - radius, center - radius, 2 * radius, 2 * radius)
+            )
+        grad = QRadialGradient(44, 28, 110)
+        grad.setColorAt(0, c("#29444B"))
+        grad.setColorAt(1, c("#101E25"))
+        p.setBrush(QBrush(grad))
+        p.setPen(QPen(c(GOLD, 195), 1.3))
+        p.drawEllipse(QRectF(11, 11, 106, 106))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(c(colors["accent"], 35), 3))
+        p.drawEllipse(QRectF(9, 9, 110, 110))
         upcoming = self._next()
         pct = upcoming[3] if upcoming else 0
-        p.setPen(QPen(c(colors["accent"]), 4.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawArc(QRectF(center_x-43, center_y-43, 86, 86), 90 * 16, -int(pct * 360 * 16))
-        draw_symbol(p, self.settings.get("symbol", "crescent"), center_x-2, center_y-8, 31, GOLD)
-        if self.settings.get("symbol", "crescent") == "crescent":
-            # One fine minaret balances the crescent as in the approved icon.
-            p.setPen(QPen(c(GOLD, 220), 1.3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            p.drawLine(center_x+14, center_y+6, center_x+14, center_y-19)
-            p.drawLine(center_x+10, center_y-11, center_x+18, center_y-11)
-            p.drawLine(center_x+14, center_y-19, center_x+14, center_y-23)
-        draw_text(p, center_x-31, center_y+15,
-                  countdown_text(upcoming[2]) if upcoming else "--:--", 11, WHITE, 600,
-                  align=Qt.AlignmentFlag.AlignCenter, width=62)
+        p.setPen(
+            QPen(
+                c(colors["accent"]),
+                3.3 + self._hover * 0.8,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+            )
+        )
+        p.drawArc(QRectF(9, 9, 110, 110), 90 * 16, -int(max(0.015, pct) * 360 * 16))
+        draw_symbol(p, self.settings["symbol"], 62, 44 - self._hover * 2, 34, "#E9BE78")
+        p.setPen(c("#C9D9D5"))
+        p.setFont(font(8, 500))
+        p.drawText(
+            QRectF(20, 67, 88, 16),
+            Qt.AlignmentFlag.AlignCenter,
+            f"bis {LABELS[upcoming[0]]}" if upcoming else "Gebetszeiten",
+        )
+        p.setFont(font(10.3, 600))
+        p.setPen(c(WHITE))
+        if upcoming:
+            hours, rest = divmod(upcoming[2], 3600)
+            time_text = f"{hours}h {rest // 60:02d}m"
+        else:
+            time_text = "lädt …" if self._loading else "offline"
+        p.drawText(QRectF(17, 84, 94, 22), Qt.AlignmentFlag.AlignCenter, time_text)
+        p.end()
 
-    def _draw_panel(self, p, colors):
-        rect = QRectF(17, 111, 426, 596)
-        # Three-layer lifted shadow and translucent glass, with gold hairline.
-        for d, a in ((12, 9), (8, 16), (4, 25)):
-            round_rect(p, rect.translated(1, d), 21, c("#000000", a))
-        fill = QLinearGradient(15, 115, 443, 707)
-        fill.setColorAt(0, c(colors["panel"], 247))
-        fill.setColorAt(0.55, c("#11191F", 247))
-        fill.setColorAt(1, c("#241F20", 249))
-        round_rect(p, rect, 21, fill, c("#A89173", 108), 1.2)
-        # Fine clipped ornamental stars: understated, not competing with data.
-        p.save()
-        clip = QPainterPath()
-        clip.addRoundedRect(rect, 21, 21)
-        p.setClipPath(clip)
-        for i in range(6):
-            xx, yy = 403 + (i % 3) * 19, 182 + (i // 3) * 19
-            p.setPen(QPen(c(GOLD, 28), 1))
-            p.drawEllipse(QRectF(xx-12, yy-12, 24, 24))
-            p.drawLine(xx-13, yy, xx+13, yy)
-            p.drawLine(xx, yy-13, xx, yy+13)
-        # Soft teal bloom behind countdown.
-        glow = QRadialGradient(379, 555, 160)
-        glow.setColorAt(0, c(colors["halo"], 85))
-        glow.setColorAt(1, c(colors["halo"], 0))
-        p.fillRect(QRectF(235, 445, 208, 194), glow)
-        # Ornamental gold geometry near the quote, clipped by rounded panel.
-        rosette_etching(p, 416, 652, 46)
-        rosette_etching(p, 439, 687, 39)
-        p.restore()
-        draw_symbol(p, "star", 47, 141, 14, GOLD)
-        draw_text(p, 64, 128, self.settings["city"], 11, WHITE, 500, width=252)
-        draw_text(p, 373, 127, "⚙", 16, MUTED, 500, align=Qt.AlignmentFlag.AlignCenter, width=22)
-        draw_text(p, 406, 127, "×", 19, MUTED, 400, align=Qt.AlignmentFlag.AlignCenter, width=22)
-        draw_text(p, 36, 168, "Gebetszeiten heute", 23, WHITE, 500, family="Georgia", width=355)
-        today = self._today()
-        now = self._now()
-        display_day = today.day if today else now.date()
-        date_line = f"{WEEKDAYS[display_day.weekday()]}, {display_day.day}. {MONTHS[display_day.month-1]} {display_day.year}"
-        draw_text(p, 38, 208, date_line, 10, MUTED, width=365)
-        draw_text(p, 38, 228, (today.hijri + " H") if today and today.hijri else
-                  "Islamisches Datum nicht verfügbar", 9, "#869496", width=370)
-        p.setPen(QPen(c("#718080", 45), 1))
-        p.drawLine(38, 247, 422, 247)
-        active = current_prayer(now, self.days)
-        icons = self.settings.get("icons", DEFAULT_ICONS)
-        for i, prayer in enumerate(PRAYERS):
-            y = 251 + 51 * i
-            if active == prayer:
-                round_rect(p, QRectF(35, y, 389, 46), 12, c(colors["row"], 210), c(colors["accent"], 185), 1.2)
-            elif i < 4:
-                p.setPen(QPen(c("#6A7477", 35), 1))
-                p.drawLine(42, y + 48, 418, y + 48)
-            draw_symbol(p, icons.get(prayer, DEFAULT_ICONS[prayer]), 59, y+23, 28,
-                        colors["accent"] if active == prayer else GOLD)
-            text_color = colors["accent"] if active == prayer else WHITE
-            draw_text(p, 91, y+6, prayer, 12, text_color, 600 if active == prayer else 450, width=180)
-            value = today.times[prayer].strftime("%H:%M") if today else "–:–"
-            draw_text(p, 300, y+6, value, 12, text_color, 600 if active == prayer else 400,
-                      width=62, align=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            p.setBrush(c("#131C23", 235))
-            p.setPen(QPen(c("#708080", 65), 1))
-            p.drawEllipse(QRectF(376, y+6, 33, 33))
-            p.setPen(QPen(c("#B4BAB9", 170), 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            p.drawLine(385, y+30, 398, y+17)
-            p.drawLine(384, y+31, 390, y+30)
-            p.drawLine(395, y+16, 399, y+20)
-        countdown_rect = QRectF(36, 519, 388, 104)
-        box_gradient = QLinearGradient(36, 519, 424, 623)
-        box_gradient.setColorAt(0, c("#1E3236", 238))
-        box_gradient.setColorAt(1, c("#294A45", 205))
-        round_rect(p, countdown_rect, 15, box_gradient, c(colors["accent"], 100), 1)
-        p.save()
-        clip_countdown = QPainterPath()
-        clip_countdown.addRoundedRect(countdown_rect, 15, 15)
-        p.setClipPath(clip_countdown)
-        mosque_etching(p, 372, 622, 0.94)
-        p.restore()
-        draw_symbol(p, "lantern", 57, 548, 22, GOLD)
-        draw_text(p, 82, 529, "NÄCHSTES GEBET", 9, MUTED, 600, width=300)
-        upcoming = self._next()
-        countdown = countdown_text(upcoming[2]) if upcoming else "--:--"
-        draw_text(p, 82, 554, countdown, 27, colors["accent"], 600, family="Georgia", width=200)
-        next_label = f"Bis {upcoming[0]} · {upcoming[1]:%H:%M}" if upcoming else "Zeiten derzeit nicht verfügbar"
-        draw_text(p, 83, 589, next_label, 10, MUTED, width=313)
-        if not self.online:
-            draw_text(p, 365, 529, "CACHE" if today and today.cached else "OFFLINE",
-                      8, GOLD, 500, width=55)
-        if self.settings.get("quote", True):
-            draw_text(p, 40, 633, "“", 28, GOLD, 600, family="Georgia", width=30)
-            quote = QUOTES.get(active or "Asr", QUOTES["Asr"])
-            if active in ("Asr", "Maghrib") or not active:
-                draw_text(p, 72, 639, "Und gewiss, im Gedenken Allahs", 11, GOLD, 450, family="Georgia", width=345, italic=True)
-                draw_text(p, 91, 657, "finden die Herzen Ruhe.", 11, GOLD, 450, family="Georgia", width=300, italic=True)
-            else:
-                draw_text(p, 72, 641, quote[0], 9.2, GOLD, 450, family="Georgia", width=350, italic=True)
-            p.setPen(QPen(c(GOLD, 120), 1))
-            p.drawLine(210, 683, 277, 683)
-            draw_text(p, 181, 684, quote[1], 7.2, MUTED, width=216)
-        if self._demo:
-            draw_text(p, 367, 205, "DEMO", 7, GOLD, 600, width=56)
-        if self.error and not today:
-            draw_text(p, 38, 692, "Keine aktuellen Daten – Verbindung / Standort prüfen",
-                      8, "#E7BC8A", width=390)
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.collapse()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def closeEvent(self, event):
-        # Deliberate exit via tray menu only; close requests hide the panel.
-        if self.expanded:
-            self.toggle()
-            event.ignore()
-        else:
-            event.accept()
+        self.hide_flow()
+        event.ignore()

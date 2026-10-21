@@ -14,3 +14,6 @@ htmlcov/
 *.egg-info/
 *.png
 !docs/*.png
+
+qa-artifacts/
+assets/namazflow.ico

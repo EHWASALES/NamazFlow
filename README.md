@@ -4,12 +4,12 @@ A calm, elegant **floating prayer-times companion for Windows 10/11**, inspired 
 
 ![NamazFlow visual concept](docs/namazflow-concept.svg)
 
-> **Status:** v0.1 initial implementation / visual QA candidate. The illustration shows **demonstration values**, not actual prayer times. Never use the concept graphic to plan prayers.
+> **Status:** v0.2 desktop interaction update. The illustration shows **demonstration values**, not actual prayer times. Never use the concept graphic to plan prayers.
 
 ## Features
 
 - A single draggable floating orb, always on top, with an elegant progress ring and live countdown.
-- Click to expand into an ornamental translucent panel with **Fajr, Dhuhr, Asr, Maghrib and Isha**, today's Gregorian/Hijri dates and a reminder.
+- Click to expand into an ornamental translucent panel with **Sabah, Öğle, İkindi, Akşam and Yatsı**, today's Gregorian/Hijri dates and a reminder.
 - Current-prayer highlighting, tomorrow's Fajr after Isha, and DST-aware countdowns.
 - Crisp drawn vector symbols, individual editable prayer icons, floating-icon style, three themes.
 - City/country, calculation method (Diyanet, MWL, ISNA, Umm Al-Qura, etc.) and Hanafi/standard Asr.
@@ -34,16 +34,16 @@ For a packaged executable, use the **Windows build** artifact from GitHub Action
 ## Controls
 
 - **Click orb** to open/close the panel; **drag orb** to move it.
-- **Gear** opens settings, **×** collapses the panel, **pencil** changes that prayer's icon.
-- **Click a prayer row** for a short reminder.
-- **Right-click** the orb or tray icon for settings, update and exit.
+- **Gear** opens settings; **×** or **Escape** collapses the panel; **pencil** changes a prayer icon.
+- **Click a prayer row** for its time and location. **Zitat & Quelle ansehen** opens the full, unabridged source text.
+- **Right-click** for separate open, collapse, hide, restore and exit actions. The tray icon or a second launch restores a hidden Flow.
 - The widget stores configuration under %APPDATA%\NamazFlow on Windows.
 
 ## Calculation and reliability
 
-Times are fetched from the [AlAdhan Prayer Times API](https://aladhan.com/prayer-times-api) for the configured **city, country, method and Asr school**. They can differ from your local mosque/DITIB timetable. Configure the method and verify local differences. Yesterday, today and tomorrow are loaded on a background thread. Validated replies are cached per date and method. If the service fails, **only previously validated cached data** is displayed with an offline indication; missing values stay blank.
+Optional calculated times are fetched from the [AlAdhan Prayer Times API](https://aladhan.com/prayer-times-api) for the configured **city, country, method and Asr school**, or explicit coordinates for the Darmstadt / Niederhöchstadt (Eschborn) presets. They can differ from your local mosque/DITIB timetable. Configure the method and verify local differences. Yesterday, today and tomorrow are loaded on a background thread. Validated replies are cached per date and method. If the service fails, **only previously validated cached data** is displayed with an offline indication; missing values stay blank.
 
-Network use: city/country are sent to AlAdhan. No ads, tracking, analytics, account, GPS access or API key.
+Network use: city/country or the selected preset coordinates are sent to AlAdhan. QuranEnc and HadeethEnc receive requests for selected public text IDs. No ads, tracking, analytics, account, GPS access or API key.
 
 ## Tests
 
@@ -73,3 +73,40 @@ CI publishes an unsigned Windows executable. Tagged builds v* trigger a Windows 
 ## License
 
 No open-source license is granted yet. Copyright belongs to the repository owner.
+
+## v0.2 desktop update
+
+- The orb and panel are independent windows: opening the panel never moves the orb.
+- Drag the visible orb to move it; its position is retained and kept inside an available screen.
+- Switch directly between **Darmstadt** and **Niederhöchstadt · Eschborn** using the dropdown or right-click menu. By default these locations use the published Diyanet calendars for Darmstadt and Eschborn, respectively. The optional AlAdhan mode uses representative town-centre coordinates. Caches remain isolated by city and source. Existing custom cities remain supported.
+- The orb reads **bis Öğle · 3h 33m**, for example: remaining hours and minutes, not a clock time. The panel spells out units and shows the target time.
+- The new crescent and five-point star replace the crossed minaret strokes. All toolbar icons are vectors and do not depend on symbol fonts.
+- The panel fades/slides in, the orb responds to hover with a soft halo, and prayer rows animate on hover. Animations can be disabled in settings.
+- Native layouts handle spacing; a scroll area keeps controls reachable on small or highly scaled displays.
+
+### Quran and hadith reminders
+
+German source texts are loaded in the background from [QuranEnc](https://quranenc.com/en/home/api/) (Bubenheim/Elyas) and the official [HadeethEnc API](https://github.com/islamhouse-dev/hadith-api). Select Quran, hadith, or alternating sources in settings. The refresh button advances the selection; automatic rotation runs every five minutes. Six verses and six curated hadith entries are available in this version.
+
+Each text has its verse reference or collection attribution, publisher, and a direct source link. HadeethEnc entry IDs are not collection hadith numbers. Translated collection names are shown for readability; the original API attribution remains in the detail view. Long previews end in an ellipsis; the detail view retains the full text. API responses are validated against the requested ID before display or caching. On failure the matching cached response is used and marked; without one, the UI displays an unavailable message, never an invented quote.
+
+### Update checks
+
+`python -m pytest -q` includes regression checks for dragging, click/close/Escape, hide/restore, location switching, stale replies, coordinate requests, separate caches, source identity, full-text preservation and layout boundaries. `python scripts/visual_audit.py --strict` captures the real orb and panel in three demonstration states; these screenshots do not contain live prayer data or real religious quotations.
+
+
+### DİTİB Deutschland: published prayer calendar (default)
+
+The default source is the **published Diyanet calendar for German cities**, as linked by DİTİB communities such as [DITIB Heidelberg](https://ditib-hd.de/gebetszeiten/). This app is independent and is not an official DİTİB product.
+
+- Darmstadt: [Diyanet calendar 11079](https://namazvakitleri.diyanet.gov.tr/tr-TR/11079/darmstadt-namaz-vakitleri).
+- Niederhöchstadt: [Eschborn calendar 11000](https://namazvakitleri.diyanet.gov.tr/tr-TR/11000/eschborn-namaz-vakitleri), explicitly labeled as Eschborn.
+- Turkish display names: **Sabah, Öğle, İkindi, Akşam, Yatsı**. Sabah uses the calendar's **İmsak** column. Its detail view also shows **Güneş** (sunrise).
+- The complete public calendar table is fetched in the background, parsed without executing page scripts, checked for valid dates and chronological times, and cached per city. Current/tomorrow rows drive the widget. On service failure only a valid matching cached calendar is accepted. No silent switch to approximate calculated times.
+- Selecting this source ignores AlAdhan calculation method and Asr-school controls, which are disabled. Users may explicitly choose AlAdhan in settings.
+
+The published timetable defines prayer beginnings, not a mosque's separately scheduled congregational prayer. Parser changes may be necessary if the publisher changes the table format.
+
+### Reproducible Windows packaging
+
+Run `python scripts/build_windows.py` before compiling `build/NamazFlow.iss`. The build isolates its native-library lookup from unrelated applications on the host PATH, then runs the packaged `--smoke-test` to verify Qt startup and a clean explicit exit. CI uses the same build entrypoint.

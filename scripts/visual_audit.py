@@ -7,6 +7,7 @@ Optionally compare to an exported crop of the approved concept:
 
 Reports screenshot metrics and reference proximity, NOT an unearned pixel-perfect claim.
 """
+
 import argparse
 from datetime import datetime, time, timedelta
 import json
@@ -17,6 +18,8 @@ from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QFontDatabase
+from namazflow.quotes import Quote
 from namazflow.prayers import PrayerDay
 from namazflow.ui import NamazWidget
 
@@ -32,8 +35,10 @@ def sample_days(day):
     result = []
     for delta in (-1, 0, 1):
         d = day + timedelta(days=delta)
-        times = {key: datetime.combine(d, time(*part), tzinfo=ZONE)
-                 for key, part in zip(keys, hour)}
+        times = {
+            key: datetime.combine(d, time(*part), tzinfo=ZONE)
+            for key, part in zip(keys, hour)
+        }
         result.append(PrayerDay(d, "Europe/Berlin", times, "09-05-1448"))
     return result
 
@@ -50,7 +55,8 @@ def measure(image: Image.Image):
     return dict(
         visible_pixels=len(visible),
         dark_fraction=round(dark / len(visible), 3),
-        gold_pixels=gold, teal_pixels=teal,
+        gold_pixels=gold,
+        teal_pixels=teal,
     )
 
 
@@ -59,11 +65,16 @@ def reference_characteristics(path):
     # Crop the expanded panel from the original 1672x941 concept composition.
     # With panel-only image supplied, avoid cropping.
     if image.width > image.height * 1.35:
-        image = image.crop((int(image.width * 0.675), int(image.height * 0.075),
-                            int(image.width * 0.925), int(image.height * 0.77)))
+        image = image.crop(
+            (
+                int(image.width * 0.675),
+                int(image.height * 0.075),
+                int(image.width * 0.925),
+                int(image.height * 0.77),
+            )
+        )
     metrics = measure(image.convert("RGBA"))
     return metrics
-
 
 
 def save_reference_comparison(reference_path, screenshot_path):
@@ -71,13 +82,18 @@ def save_reference_comparison(reference_path, screenshot_path):
     reference = Image.open(reference_path).convert("RGB")
     if reference.width > reference.height * 1.35:
         reference = reference.crop(
-            (int(reference.width * .675), int(reference.height * .075),
-             int(reference.width * .925), int(reference.height * .77)))
+            (
+                int(reference.width * 0.675),
+                int(reference.height * 0.075),
+                int(reference.width * 0.925),
+                int(reference.height * 0.77),
+            )
+        )
     before = reference.resize((426, 666))
     actual = Image.open(screenshot_path).convert("RGBA")
     backdrop = Image.new("RGBA", actual.size, "#283743")
     backdrop.alpha_composite(actual)
-    rendered = backdrop.crop((128, 39, 554, 635)).convert("RGB").resize((426, 666))
+    rendered = backdrop.convert("RGB").resize((426, 666))
     paired = Image.new("RGB", (900, 720), "#EBEAEB")
     paired.paste(before, (12, 42))
     paired.paste(rendered, (462, 42))
@@ -88,6 +104,7 @@ def save_reference_comparison(reference_path, screenshot_path):
     paired.save(destination)
     return str(destination)
 
+
 def evaluate(label, img, target, reference=None):
     values = measure(img)
     goals = {
@@ -95,15 +112,22 @@ def evaluate(label, img, target, reference=None):
         "dark_glass": values["dark_fraction"] > (0.60 if target == "panel" else 0.35),
         "gold_detail": values["gold_pixels"] > (65 if target == "panel" else 20),
         "teal_accent": values["teal_pixels"] > (70 if target == "panel" else 20),
-        "content_visible": values["visible_pixels"] > (90000 if target == "panel" else 3000),
+        "content_visible": values["visible_pixels"]
+        > (90000 if target == "panel" else 3000),
     }
-    outcome = {"stage": label, "metrics": values, "checks": goals,
-               "pass": all(goals.values())}
+    outcome = {
+        "stage": label,
+        "metrics": values,
+        "checks": goals,
+        "pass": all(goals.values()),
+    }
     if reference and target == "panel":
         # Palette distance only; concept screenshot has photographic background.
         outcome["concept_palette_comparison"] = {
             "reference": reference,
-            "difference_dark_fraction": round(abs(values["dark_fraction"] - reference["dark_fraction"]), 3),
+            "difference_dark_fraction": round(
+                abs(values["dark_fraction"] - reference["dark_fraction"]), 3
+            ),
             "method": "Dark-area ratio only; not an image similarity score",
         }
     return outcome
@@ -112,26 +136,57 @@ def evaluate(label, img, target, reference=None):
 def main():
     arg = argparse.ArgumentParser()
     arg.add_argument("--reference-image", type=Path)
-    arg.add_argument("--strict", action="store_true", help="Return failure for QA gates")
+    arg.add_argument(
+        "--strict", action="store_true", help="Return failure for QA gates"
+    )
     options = arg.parse_args()
     app = QApplication.instance() or QApplication(sys.argv)
+    if os.name == "nt" and app.platformName() == "offscreen":
+        for family in ("segoeui.ttf", "georgia.ttf"):
+            QFontDatabase.addApplicationFont(
+                str(Path(os.environ["WINDIR"]) / "Fonts" / family)
+            )
     old_refresh = NamazWidget.refresh
+    old_quotes = NamazWidget.load_quote
+    NamazWidget.load_quote = lambda self: None
     NamazWidget.refresh = lambda self: None
     try:
         window = NamazWidget()
     finally:
         NamazWidget.refresh = old_refresh
+        NamazWidget.load_quote = old_quotes
     window.tick.stop()
+    window.motion.stop()
+    window.quote_timer.stop()
+    window.settings.update(
+        animations=False, location="darmstadt", quote=True, theme="midnight"
+    )
+    window.panel.sync_city()
     date = datetime.now(ZONE).date()
     window._now = lambda: datetime.combine(date, time(16, 47), tzinfo=ZONE)
     window.days = sample_days(date)
     window.error = ""
     window.online = True
     window._demo = True
+    window._quote_received(
+        Quote(
+            "Testtext zur Prüfung von Zeilenumbruch, Lesbarkeit und Abständen.",
+            "DEMO · kein religiöses Zitat",
+            "https://quranenc.com",
+            "quran",
+            "Testdaten",
+        ),
+        "",
+        window._quote_generation,
+    )
     window.move(50, 50)
     window.show()
     app.processEvents()
-    ref = reference_characteristics(options.reference_image) if options.reference_image else None
+    ref = (
+        reference_characteristics(options.reference_image)
+        if options.reference_image
+        else None
+    )
     rows = []
     # Pass 1: the collapsed floating icon, its translucency, vector and time ring.
     p1 = OUT / "iteration-1-floating-orb.png"
@@ -141,7 +196,7 @@ def main():
     window.toggle()
     app.processEvents()
     p2 = OUT / "iteration-2-expanded-panel.png"
-    window.grab().save(str(p2))
+    window.panel.grab().save(str(p2))
     rows.append(evaluate("2 · Concept glass panel", Image.open(p2), "panel", ref))
     # Pass 3: personalization and a repeat readability/palette check.
     window.settings["icons"]["Asr"] = "lantern"
@@ -149,9 +204,14 @@ def main():
     window.update()
     app.processEvents()
     p3 = OUT / "iteration-3-custom-symbols.png"
-    window.grab().save(str(p3))
+    window._render_state()
+    window.panel.grab().save(str(p3))
     rows.append(evaluate("3 · Final customizable UI", Image.open(p3), "panel", ref))
-    comparison = save_reference_comparison(options.reference_image, p3) if options.reference_image else None
+    comparison = (
+        save_reference_comparison(options.reference_image, p3)
+        if options.reference_image
+        else None
+    )
     report = {
         "comparison_image": comparison,
         "mode": "DEMONSTRATION – screenshot prayer times are not live",
@@ -164,8 +224,11 @@ def main():
         ],
         "stages": rows,
     }
-    (OUT / "visual-qa.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    (OUT / "visual-qa.json").write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    window.collapse()
     window.hide()
     window.tray.hide()
     if options.strict and not all(r["pass"] for r in rows):

@@ -1,6 +1,6 @@
 ; NamazFlow user-level setup, compiled using Inno Setup 6
 #define AppName "NamazFlow"
-#define AppVersion "0.1.0"
+#define AppVersion "0.2.0"
 
 [Setup]
 AppId={{E0DBE342-B6AF-4BEA-8306-D5A02EF69587}
@@ -11,7 +11,7 @@ DefaultGroupName=NamazFlow
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=NamazFlow-0.1.0-Setup
+OutputBaseFilename=NamazFlow-0.2.0-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

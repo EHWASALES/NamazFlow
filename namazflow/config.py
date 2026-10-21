@@ -1,4 +1,5 @@
 """Persistent, user-controlled settings and Windows autostart."""
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,17 @@ DEFAULTS = {
     "x": None,
     "y": None,
     "quote": True,
-    "icons": {"Fajr": "sunrise", "Dhuhr": "sun", "Asr": "afternoon", "Maghrib": "sunset", "Isha": "crescent"},
+    "animations": True,
+    "quote_source": "mixed",
+    "location": "",
+    "time_source": "ditib",
+    "icons": {
+        "Fajr": "sunrise",
+        "Dhuhr": "sun",
+        "Asr": "afternoon",
+        "Maghrib": "sunset",
+        "Isha": "crescent",
+    },
 }
 THEMES = ("midnight", "emerald", "sand")
 SYMBOLS = ("crescent", "mosque", "star", "lantern")
@@ -39,7 +50,9 @@ def normalize(raw: dict | None) -> dict:
             continue
         if key in raw and type(raw[key]) is type(DEFAULTS[key]):
             data[key] = raw[key]
-        elif key in ("x", "y") and (raw.get(key) is None or isinstance(raw.get(key), int)):
+        elif key in ("x", "y") and (
+            raw.get(key) is None or isinstance(raw.get(key), int)
+        ):
             data[key] = raw.get(key)
     data["city"] = data["city"].strip()[:120] or DEFAULTS["city"]
     data["country"] = data["country"].strip()[:120] or DEFAULTS["country"]
@@ -51,10 +64,25 @@ def normalize(raw: dict | None) -> dict:
         data["theme"] = "midnight"
     if data["symbol"] not in SYMBOLS:
         data["symbol"] = "crescent"
+    if data["location"] not in ("", "darmstadt", "niederhoechstadt"):
+        data["location"] = ""
+    if data["quote_source"] not in ("mixed", "quran", "hadith"):
+        data["quote_source"] = "mixed"
+    if data["time_source"] not in ("ditib", "calculated"):
+        data["time_source"] = "ditib"
     if isinstance(raw.get("icons"), dict):
         for prayer in DEFAULTS["icons"]:
             icon = raw["icons"].get(prayer)
-            if icon in ("sunrise", "sun", "afternoon", "sunset", "crescent", "mosque", "star", "lantern"):
+            if icon in (
+                "sunrise",
+                "sun",
+                "afternoon",
+                "sunset",
+                "crescent",
+                "mosque",
+                "star",
+                "lantern",
+            ):
                 data["icons"][prayer] = icon
     return data
 
@@ -71,7 +99,9 @@ def save(settings: dict, path: Path | None = None) -> None:
     path = path or data_path() / "settings.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(normalize(settings), indent=2, ensure_ascii=False), encoding="utf-8")
+    temporary.write_text(
+        json.dumps(normalize(settings), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     temporary.replace(path)
 
 
@@ -79,13 +109,16 @@ def set_windows_autostart(enabled: bool) -> None:
     if sys.platform != "win32":
         return
     import winreg
+
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     if getattr(sys, "frozen", False):
         command = f'"{sys.executable}"'
     else:
         module = Path(__file__).resolve().parent.parent / "main.py"
         command = f'"{sys.executable}" "{module}"'
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
+    with winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
+    ) as key:
         if enabled:
             winreg.SetValueEx(key, "NamazFlow", 0, winreg.REG_SZ, command)
         else:

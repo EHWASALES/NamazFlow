@@ -17,8 +17,7 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install -e ".[dev]" pyinstaller
       - run: python -m pytest -q
-      - run: python scripts/make_windows_icon.py
-      - run: pyinstaller --noconfirm --clean --onefile --windowed --icon assets/namazflow.ico --name NamazFlow main.py
+      - run: python scripts/build_windows.py
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
       - name: Build installer
