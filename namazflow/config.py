@@ -35,6 +35,8 @@ def normalize(raw: dict | None) -> dict:
     if not isinstance(raw, dict):
         return data
     for key in DEFAULTS:
+        if key == "icons":
+            continue
         if key in raw and type(raw[key]) is type(DEFAULTS[key]):
             data[key] = raw[key]
         elif key in ("x", "y") and (raw.get(key) is None or isinstance(raw.get(key), int)):
