@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-label="NamazFlow desktop concept illustration">
+<defs>
+  <linearGradient id="wall" x2="1" y2="1"><stop stop-color="#182a37"/><stop offset=".58" stop-color="#31485b"/><stop offset="1" stop-color="#121c29"/></linearGradient>
+  <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#25343e" stop-opacity=".96"/><stop offset=".58" stop-color="#101a22" stop-opacity=".98"/><stop offset="1" stop-color="#282222" stop-opacity=".95"/></linearGradient>
+  <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5cebd7"/><stop offset="1" stop-color="#2cb49f"/></linearGradient>
+  <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f9d99b"/><stop offset="1" stop-color="#b88342"/></linearGradient>
+  <filter id="shadow"><feGaussianBlur stdDeviation="17"/></filter>
+  <filter id="glow"><feGaussianBlur stdDeviation="6"/></filter>
+  <pattern id="orn" width="64" height="64" patternUnits="userSpaceOnUse"><g stroke="#D5AB69" stroke-opacity=".13" fill="none"><path d="M32 0 L64 32 32 64 0 32Z M32 11L53 32 32 53 11 32Z"/><circle cx="32" cy="32" r="19"/></g></pattern>
+  <clipPath id="clip"><rect x="710" y="56" width="415" height="628" rx="23"/></clipPath>
+</defs>
+<rect width="1200" height="720" fill="url(#wall)"/>
+<circle cx="180" cy="130" r="260" fill="#6e8495" fill-opacity=".12"/><circle cx="1120" cy="650" r="280" fill="#0abfa8" fill-opacity=".07"/>
+<path d="M0 540 Q250 500 500 540 T1200 520 V720 H0Z" fill="#0a121b" fill-opacity=".4"/>
+<g fill="#bbc8ce" font-family="Segoe UI,Arial,sans-serif">
+  <text x="88" y="100" font-size="18" font-weight="600" letter-spacing="4" fill="#dbb678">NAMAZFLOW</text>
+  <text x="88" y="180" font-size="46" font-family="Georgia,serif">Dein Gebet.</text>
+  <text x="88" y="233" font-size="46" font-family="Georgia,serif">Dein Moment.</text>
+  <text x="90" y="291" font-size="17" fill="#b9c6c7">Ein einziges schwebendes Symbol.</text>
+  <text x="90" y="320" font-size="17" fill="#b9c6c7">Alle Gebetszeiten auf einen Klick.</text>
+  <text x="90" y="635" font-size="13" fill="#e0b977">Designstudie · Beispielzeiten, keine Live-Daten</text>
+</g>
+<rect x="714" y="68" width="415" height="628" rx="23" fill="#000" opacity=".45" filter="url(#shadow)"/>
+<rect x="710" y="56" width="415" height="628" rx="23" fill="url(#glass)" stroke="#866e51" stroke-opacity=".75"/>
+<g clip-path="url(#clip)"><rect x="962" y="76" width="210" height="260" fill="url(#orn)"/><circle cx="1100" cy="570" r="135" fill="#1b6259" opacity=".18" filter="url(#glow)"/></g>
+<text x="740" y="98" fill="#dededf" font-size="12" font-family="Segoe UI,Arial,sans-serif">⌖  Darmstadt</text>
+<text x="1050" y="98" fill="#e4c18a" font-size="15" font-family="Segoe UI,Arial,sans-serif">⚙    ×</text>
+<text x="740" y="153" fill="#f4efe7" font-size="29" font-family="Georgia,serif">Gebetszeiten heute</text>
+<text x="740" y="180" fill="#aab5b9" font-size="13" font-family="Segoe UI,Arial,sans-serif">Mittwoch, 21. Oktober · Designbeispiel</text>
+<line x1="740" y1="210" x2="1098" y2="210" stroke="#ffffff" stroke-opacity=".12"/>
+<g font-family="Segoe UI,Arial,sans-serif" font-size="16">
+  <g fill="#ddd0ad"><text x="750" y="251">☀</text><text x="750" y="303">☼</text><text x="750" y="355">◔</text><text x="750" y="407">☀</text><text x="750" y="459">☾</text></g>
+  <g fill="#f4f0ec"><text x="793" y="251">Fajr</text><text x="793" y="303">Dhuhr</text><text x="793" y="407">Maghrib</text><text x="793" y="459">Isha</text></g>
+  <g fill="#f4f0ec" text-anchor="end"><text x="1055" y="251">06:11</text><text x="1055" y="303">12:46</text><text x="1055" y="407">18:11</text><text x="1055" y="459">19:32</text></g>
+</g>
+<rect x="729" y="322" width="373" height="48" rx="12" fill="#183937" stroke="#58e5d0" stroke-opacity=".85"/>
+<text x="793" y="352" font-family="Segoe UI,Arial,sans-serif" font-size="16" font-weight="bold" fill="#60e7d3">Asr</text>
+<text x="1055" y="352" text-anchor="end" font-family="Segoe UI,Arial,sans-serif" font-size="16" font-weight="bold" fill="#60e7d3">15:42</text>
+<text x="750" y="352" fill="#dcb877" font-size="17">◒</text>
+<rect x="730" y="495" width="375" height="102" rx="14" fill="#24413f" fill-opacity=".72" stroke="#64dcce" stroke-opacity=".5"/>
+<text x="754" y="519" fill="#c3cecd" font-size="12" font-family="Segoe UI,Arial,sans-serif">NÄCHSTES GEBET</text>
+<text x="754" y="568" fill="#59e5cf" font-size="38" font-family="Georgia,serif">01:24</text>
+<text x="884" y="562" fill="#b6c5c2" font-size="13" font-family="Segoe UI,Arial,sans-serif">Bis Maghrib</text>
+<text x="742" y="623" fill="#e8bf83" font-size="22" font-family="Georgia,serif">“</text>
+<text x="766" y="623" fill="#deb57a" font-size="12" font-family="Georgia,serif">Im Gedenken Allahs finden Herzen Ruhe.</text>
+<text x="765" y="646" fill="#909ca0" font-size="11" font-family="Segoe UI,Arial,sans-serif">Koran 13:28 · sinngemäß</text>
+<circle cx="679" cy="100" r="53" fill="#000" opacity=".45" filter="url(#shadow)"/>
+<circle cx="679" cy="100" r="48" fill="#17242b" stroke="#c49b5a" stroke-width="2.4"/>
+<circle cx="679" cy="100" r="43" fill="none" stroke="#34605d" stroke-width="4"/>
+<path d="M678 57 A43 43 0 0 1 721 100" fill="none" stroke="#64e4cc" stroke-width="4" stroke-linecap="round"/>
+<path d="M675 67 A19 19 0 1 0 694 101 A16 16 0 0 1 675 67Z" fill="url(#gold)"/>
+<path d="M689 98 h18 v-15 l-9 -12 -9 12Z" fill="#e3ba79"/><path d="M707 94 v-23" stroke="#e3ba79" stroke-width="2"/>
+<text x="679" y="128" fill="#f6f4f0" text-anchor="middle" font-size="13" font-family="Segoe UI,Arial,sans-serif">01:24</text>
+</svg>
