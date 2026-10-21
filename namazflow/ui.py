@@ -242,6 +242,7 @@ class NamazWidget(QWidget):
         self._generation = 0
         self._last_refresh = datetime.now()
         self._last_day = None
+        self._loading = False
         self._last_notification = None
         self._demo = False
         self.loaded.connect(self._received)
@@ -249,7 +250,8 @@ class NamazWidget(QWidget):
         self.tray = QSystemTrayIcon(self._icon, self)
         self.tray.setToolTip("NamazFlow · Gebetszeiten")
         self.tray.activated.connect(lambda reason: self.toggle() if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
-        self.tray.setContextMenu(self.menu())
+        self.tray_menu = self.menu()
+        self.tray.setContextMenu(self.tray_menu)
         self.tray.show()
         self.resize(*self.COLLAPSED)
         screen = QApplication.primaryScreen().availableGeometry()
@@ -298,6 +300,7 @@ class NamazWidget(QWidget):
         generation = self._generation
         config = dict(self.settings)
         self._last_refresh = datetime.now()
+        self._loading = True
         self.error = "Aktualisiere Gebetszeiten …" if not self.days else self.error
         self.update()
         def task():
@@ -318,9 +321,10 @@ class NamazWidget(QWidget):
         if generation != self._generation:
             return
         self.days = days
+        self._loading = False
         self.error = error
         self.online = any(not x.cached for x in days)
-        self._last_day = datetime.now().date()
+        self._last_day = self._now().date()
         if not days:
             self.error = error or "Keine gültigen Gebetszeiten verfügbar."
         self.update()
@@ -340,7 +344,7 @@ class NamazWidget(QWidget):
 
     def _tick(self):
         now = self._now()
-        if self._last_day != now.date() or (datetime.now() - self._last_refresh).total_seconds() > 1800:
+        if not self._loading and (self._last_day != now.date() or (datetime.now() - self._last_refresh).total_seconds() > 1800):
             self.refresh()
         upcoming = self._next()
         if upcoming and self.settings["notifications"] and not self._demo:
