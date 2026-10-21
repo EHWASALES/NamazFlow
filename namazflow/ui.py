@@ -10,7 +10,7 @@ import sys
 import threading
 from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import Qt, QPoint, QRectF, Signal, QTimer, QEvent
+from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, Signal, QTimer, QEvent
 from PySide6.QtGui import (
     QColor, QBrush, QFont, QIcon, QLinearGradient, QPainter, QPainterPath,
     QPen, QPixmap, QRadialGradient,
@@ -280,7 +280,8 @@ class SettingsDialog(QDialog):
 class NamazWidget(QWidget):
     loaded = Signal(object, str, int)
     COLLAPSED = (108, 108)
-    EXPANDED = (462, 732)
+    EXPANDED = (577, 657)
+    PANEL_DX, PANEL_DY = 111, -72
 
     def __init__(self):
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
@@ -484,6 +485,7 @@ class NamazWidget(QWidget):
             return
         if not self.expanded:
             return
+        pt = pt - QPointF(self.PANEL_DX, self.PANEL_DY)
         if QRectF(364, 124, 37, 32).contains(pt):
             self.configure()
         elif QRectF(402, 124, 30, 32).contains(pt):
@@ -509,7 +511,13 @@ class NamazWidget(QWidget):
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         color = current_palette(self.settings["theme"])
         if self.expanded:
+            p.save()
+            p.translate(self.PANEL_DX, self.PANEL_DY)
             self._draw_panel(p, color)
+            p.restore()
+            # A slim teal bridge ties the floating orb to the opened panel.
+            p.setPen(QPen(c(color["accent"], 95), 2))
+            p.drawLine(103, 55, 128, 55)
         self._draw_orb(p, color)
         p.end()
 
