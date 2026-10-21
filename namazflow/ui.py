@@ -50,7 +50,7 @@ def c(value: str, alpha: int = 255) -> QColor:
 def font(size: float, weight: int = 400, family: str = "Segoe UI") -> QFont:
     result = QFont(family)
     result.setPointSizeF(size)
-    result.setWeight(QFont.Weight(weight))
+    result.setWeight(QFont.Weight.Bold if weight >= 600 else (QFont.Weight.Medium if weight >= 500 else QFont.Weight.Normal))
     return result
 
 
@@ -556,6 +556,8 @@ class NamazWidget(QWidget):
             quote = QUOTES.get(active or "Asr", QUOTES["Asr"])
             draw_text(p, 70, 639, quote[0], 9.1, GOLD, 450, family="Georgia", width=350)
             draw_text(p, 70, 665, quote[1], 8, MUTED, width=340)
+        if self._demo:
+            draw_text(p, 347, 691, "DESIGN-DEMO", 8, GOLD, 600, width=88)
         if self.error and not today:
             draw_text(p, 38, 692, "Keine aktuellen Daten – Verbindung / Standort prüfen",
                       8, "#E7BC8A", width=390)
