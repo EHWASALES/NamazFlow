@@ -50,11 +50,25 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: python -m pip install -e . pyinstaller
+        run: python -m pip install -e ".[dev]" pyinstaller
+      - name: Generate brand icon
+        run: python scripts/make_windows_icon.py
       - name: Build standalone executable
-        run: pyinstaller --noconfirm --clean --windowed --onefile --name NamazFlow main.py
+        run: pyinstaller --noconfirm --clean --windowed --onefile --icon assets/namazflow.ico --name NamazFlow main.py
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Build Windows Setup
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" build\NamazFlow.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: NamazFlow-Windows-unsigned
           path: dist/NamazFlow.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NamazFlow-Setup-unsigned
+          path: dist/NamazFlow-*-Setup.exe
           if-no-files-found: error
