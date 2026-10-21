@@ -137,6 +137,59 @@ def draw_symbol(p: QPainter, kind: str, x: float, y: float, size=25, color=GOLD)
     p.restore()
 
 
+
+def mosque_etching(p: QPainter, x: float, y: float, scale: float = 1.0):
+    """Etched domes/minaret from the approved concept; no external font/assets."""
+    p.save()
+    p.translate(x, y)
+    p.scale(scale, scale)
+    p.setPen(QPen(c(GOLD, 100), 1.2))
+    p.setBrush(c(GOLD, 42))
+    dome = QPainterPath()
+    dome.moveTo(-41, 0)
+    dome.lineTo(-41, -17)
+    dome.cubicTo(-40, -35, -27, -47, -3, -54)
+    dome.cubicTo(20, -47, 33, -34, 35, -17)
+    dome.lineTo(35, 0)
+    dome.closeSubpath()
+    p.drawPath(dome)
+    p.drawLine(-2, -54, -2, -71)
+    p.drawEllipse(QRectF(-5, -76, 6, 6))
+    for xx in (-26, -5, 16):
+        p.drawArc(QRectF(xx, -20, 13, 20), 0, 180 * 16)
+    minaret = QPainterPath()
+    minaret.moveTo(43, 1)
+    minaret.lineTo(43, -68)
+    minaret.lineTo(40, -68)
+    minaret.lineTo(40, -72)
+    minaret.lineTo(53, -72)
+    minaret.lineTo(53, -68)
+    minaret.lineTo(50, -68)
+    minaret.lineTo(50, 1)
+    minaret.closeSubpath()
+    p.drawPath(minaret)
+    p.drawLine(39, -81, 54, -81)
+    p.drawLine(46, -81, 46, -98)
+    p.drawEllipse(QRectF(44, -103, 4, 4))
+    p.restore()
+
+
+def rosette_etching(p: QPainter, x: float, y: float, size: float = 44):
+    """Eightfold geometric gold filigree, masked by the parent panel."""
+    p.save()
+    p.translate(x, y)
+    p.setPen(QPen(c(GOLD, 52), 1.1))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    for angle in (0, 45, 90, 135):
+        p.save()
+        p.rotate(angle)
+        p.drawRect(QRectF(-size * .5, -size * .5, size, size))
+        p.restore()
+    p.drawEllipse(QRectF(-size * .51, -size * .51, size * 1.02, size * 1.02))
+    p.drawEllipse(QRectF(-size * .33, -size * .33, size * .66, size * .66))
+    p.restore()
+
+
 def current_palette(name: str):
     if name == "emerald":
         return {"panel": "#102B2A", "row": "#1A3B39", "halo": "#245B4F", "accent": "#60E6C7"}
@@ -507,6 +560,9 @@ class NamazWidget(QWidget):
         glow.setColorAt(0, c(colors["halo"], 85))
         glow.setColorAt(1, c(colors["halo"], 0))
         p.fillRect(QRectF(235, 445, 208, 194), glow)
+        # Ornamental gold geometry near the quote, clipped by rounded panel.
+        rosette_etching(p, 416, 652, 46)
+        rosette_etching(p, 439, 687, 39)
         p.restore()
         draw_symbol(p, "star", 47, 141, 14, GOLD)
         draw_text(p, 64, 128, self.settings["city"], 11, WHITE, 500, width=252)
@@ -538,13 +594,24 @@ class NamazWidget(QWidget):
             value = today.times[prayer].strftime("%H:%M") if today else "–:–"
             draw_text(p, 300, y+6, value, 12, text_color, 600 if active == prayer else 400,
                       width=62, align=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            draw_text(p, 381, y+6, "✎", 15, MUTED, width=24,
-                      align=Qt.AlignmentFlag.AlignCenter)
+            p.setBrush(c("#131C23", 235))
+            p.setPen(QPen(c("#708080", 65), 1))
+            p.drawEllipse(QRectF(376, y+6, 33, 33))
+            p.setPen(QPen(c("#B4BAB9", 170), 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            p.drawLine(385, y+30, 398, y+17)
+            p.drawLine(384, y+31, 390, y+30)
+            p.drawLine(395, y+16, 399, y+20)
         countdown_rect = QRectF(36, 519, 388, 104)
         box_gradient = QLinearGradient(36, 519, 424, 623)
         box_gradient.setColorAt(0, c("#1E3236", 238))
         box_gradient.setColorAt(1, c("#294A45", 205))
         round_rect(p, countdown_rect, 15, box_gradient, c(colors["accent"], 100), 1)
+        p.save()
+        clip_countdown = QPainterPath()
+        clip_countdown.addRoundedRect(countdown_rect, 15, 15)
+        p.setClipPath(clip_countdown)
+        mosque_etching(p, 372, 622, 0.94)
+        p.restore()
         draw_symbol(p, "lantern", 57, 548, 22, GOLD)
         draw_text(p, 82, 529, "NÄCHSTES GEBET", 9, MUTED, 600, width=300)
         upcoming = self._next()
@@ -556,12 +623,18 @@ class NamazWidget(QWidget):
             draw_text(p, 365, 529, "CACHE" if today and today.cached else "OFFLINE",
                       8, GOLD, 500, width=55)
         if self.settings.get("quote", True):
-            draw_text(p, 40, 637, "“", 26, GOLD, 600, family="Georgia", width=30)
+            draw_text(p, 40, 633, "“", 28, GOLD, 600, family="Georgia", width=30)
             quote = QUOTES.get(active or "Asr", QUOTES["Asr"])
-            draw_text(p, 70, 639, quote[0], 9.1, GOLD, 450, family="Georgia", width=350)
-            draw_text(p, 70, 665, quote[1], 8, MUTED, width=340)
+            if active in ("Asr", "Maghrib") or not active:
+                draw_text(p, 72, 639, "Und gewiss, im Gedenken Allahs", 11, GOLD, 450, family="Georgia", width=345)
+                draw_text(p, 91, 657, "finden die Herzen Ruhe.", 11, GOLD, 450, family="Georgia", width=300)
+            else:
+                draw_text(p, 72, 641, quote[0], 9.2, GOLD, 450, family="Georgia", width=350)
+            p.setPen(QPen(c(GOLD, 120), 1))
+            p.drawLine(210, 683, 277, 683)
+            draw_text(p, 181, 684, quote[1], 7.2, MUTED, width=216)
         if self._demo:
-            draw_text(p, 347, 691, "DESIGN-DEMO", 8, GOLD, 600, width=88)
+            draw_text(p, 367, 205, "DEMO", 7, GOLD, 600, width=56)
         if self.error and not today:
             draw_text(p, 38, 692, "Keine aktuellen Daten – Verbindung / Standort prüfen",
                       8, "#E7BC8A", width=390)
