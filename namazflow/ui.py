@@ -1,8 +1,12 @@
 """Native desktop controls with independent orb and panel windows."""
 
 from datetime import datetime, timedelta
+from dataclasses import replace
+import logging
+from pathlib import Path
 import math
 import threading
+from time import monotonic
 from zoneinfo import ZoneInfo
 from PySide6.QtCore import (
     Qt,
@@ -27,6 +31,8 @@ from PySide6.QtGui import (
     QPixmap,
     QRadialGradient,
     QDesktopServices,
+    QFontDatabase,
+    QFontMetricsF,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -43,6 +49,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QTextBrowser,
+    QSizePolicy,
 )
 from .config import data_path, load, save, set_windows_autostart
 from .drawing import (
@@ -57,10 +64,11 @@ from .drawing import (
     rosette_etching,
 )
 from .locations import LOCATIONS, location_label
-from .diyanet import get_calendar
+from .diyanet import get_calendar, read_cached_calendar
 from .prayers import LABELS, PRAYERS, current_prayer, get_day, next_prayer
 from .quotes import get_quote
 from .settings import SettingsDialog
+from .calligraphy import draw_emblem
 
 ICONS = (
     "sunrise",
@@ -83,6 +91,13 @@ ICON_LABELS = (
     "Laterne",
 )
 DEFAULT_ICONS = dict(zip(PRAYERS, ICONS[:5]))
+ARABIC_PRAYERS = {
+    "Fajr": "الفجر",
+    "Dhuhr": "الظهر",
+    "Asr": "العصر",
+    "Maghrib": "المغرب",
+    "Isha": "العشاء",
+}
 WEEKDAYS = (
     "Montag",
     "Dienstag",
@@ -196,6 +211,69 @@ def button(text, tooltip, callback):
     return widget
 
 
+class PrayerCalligraphy(QPushButton):
+    """A shaped calligraphic emblem with an animated current-prayer tint."""
+
+    def __init__(self, owner, prayer):
+        super().__init__(ARABIC_PRAYERS[prayer])
+        if not getattr(PrayerCalligraphy, "_font_loaded", False):
+            QFontDatabase.addApplicationFont(
+                str(Path(__file__).parent / "fonts" / "Amiri-Regular.ttf")
+            )
+            PrayerCalligraphy._font_loaded = True
+        self.owner, self.prayer = owner, prayer
+        self.active = False
+        self.highlight = 0.0
+        self.tint_animation = QVariantAnimation(self)
+        self.tint_animation.setDuration(520)
+        self.tint_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self.tint_animation.valueChanged.connect(self._highlight_changed)
+        self.setFixedSize(84, 68)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(f"{ARABIC_PRAYERS[prayer]} · {LABELS[prayer]}")
+        self.setAccessibleName(f"Gebetszeit {LABELS[prayer]} · {ARABIC_PRAYERS[prayer]}")
+        self.clicked.connect(lambda: owner.show_detail(prayer))
+
+    def _highlight_changed(self, value):
+        self.highlight = float(value)
+        self.update()
+
+    def set_active(self, active):
+        target = float(active)
+        if active == self.active and self.owner.settings["animations"]:
+            return
+        self.active = active
+        self.tint_animation.stop()
+        if not self.owner.settings["animations"] or not self.isVisible():
+            self._highlight_changed(target)
+            return
+        self.tint_animation.setStartValue(self.highlight)
+        self.tint_animation.setEndValue(target)
+        self.tint_animation.start()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        accent = current_palette(self.owner.settings["theme"])["accent"]
+        gold, teal = c(GOLD), c(accent)
+        ink = c(GOLD)
+        for get, put in (("red", "setRed"), ("green", "setGreen"), ("blue", "setBlue")):
+            getattr(ink, put)(round(getattr(gold, get)() * (1 - self.highlight)
+                                   + getattr(teal, get)() * self.highlight))
+        if not draw_emblem(p, self.prayer, QRectF(0, 0, 84, 68), ink.name()):
+            lettering = font(23, family="Amiri")
+            width = QFontMetricsF(lettering).horizontalAdvance(self.text())
+            if width > 64:
+                lettering.setPointSizeF(23 * 64 / width)
+            p.setFont(lettering)
+            p.setPen(ink)
+            p.drawText(QRectF(10, 6, 64, 54), Qt.AlignmentFlag.AlignCenter, self.text())
+        if self.hasFocus():
+            p.setPen(QPen(c(accent), 1, Qt.PenStyle.DotLine))
+            p.drawRoundedRect(QRectF(1, 1, 82, 66), 7, 7)
+        p.end()
+
+
 class PrayerRow(QWidget):
     def __init__(self, owner, prayer):
         super().__init__()
@@ -205,8 +283,10 @@ class PrayerRow(QWidget):
         self.animation.setDuration(160)
         self.animation.valueChanged.connect(self._hover_value)
         row = QHBoxLayout(self)
-        row.setContentsMargins(10, 6, 8, 6)
-        row.setSpacing(8)
+        row.setContentsMargins(8, 6, 8, 6)
+        row.setSpacing(6)
+        self.calligraphy = PrayerCalligraphy(owner, prayer)
+        row.addWidget(self.calligraphy)
         self.detail = button(
             LABELS[prayer],
             f"Gebetszeit {LABELS[prayer]}",
@@ -257,13 +337,13 @@ class PrayerRow(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         colors = current_palette(self.owner.settings["theme"])
-        if self.active or self.hover:
+        if self.owner.settings["calligraphy"] or self.active or self.hover:
             round_rect(
                 p,
                 QRectF(self.rect()).adjusted(1, 1, -1, -1),
                 11,
-                c(colors["row"], 215 if self.active else int(150 * self.hover)),
-                c(colors["accent"], 160 if self.active else int(70 * self.hover)),
+                c(colors["row"], 215 if self.active else int(65 + 85 * self.hover)),
+                c(colors["accent"], 160 if self.active else int(30 + 40 * self.hover)),
             )
         else:
             p.setPen(QPen(c("#718080", 35), 1))
@@ -309,7 +389,7 @@ class PrayerPanel(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        outer.addWidget(self.scroll)
+        outer.addWidget(self.scroll, 1)
         self.content = QWidget()
         self.content.setObjectName("panelContent")
         self.content.setStyleSheet("#panelContent { background:transparent; }")
@@ -350,8 +430,9 @@ class PrayerPanel(QWidget):
         self.countdown = CountdownCard()
         layout.addWidget(self.countdown)
         self.quote_box = QWidget()
+        self.quote_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         quote_layout = QVBoxLayout(self.quote_box)
-        quote_layout.setContentsMargins(0, 2, 0, 0)
+        quote_layout.setContentsMargins(20, 2, 20, 18)
         quote_layout.setSpacing(8)
         quote_header = QHBoxLayout()
         self.quote_heading = label("MOMENT DER BESINNUNG", "eyebrow")
@@ -364,9 +445,16 @@ class PrayerPanel(QWidget):
         self.quote_text = label("Zitat wird geladen …")
         self.quote_text.setStyleSheet("font:italic 14px 'Georgia'; color:#E5C795;")
         self.quote_text.setWordWrap(True)
-        self.quote_text.setMinimumHeight(44)
-        self.quote_text.setMaximumHeight(84)
-        quote_layout.addWidget(self.quote_text)
+        self.quote_text.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.quote_scroll = QScrollArea()
+        self.quote_scroll.setObjectName("quoteScroll")
+        self.quote_scroll.setWidgetResizable(True)
+        self.quote_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.quote_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.quote_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.quote_scroll.setFixedHeight(100)
+        self.quote_scroll.setWidget(self.quote_text)
+        quote_layout.addWidget(self.quote_scroll)
         self.quote_ref = label("", "muted")
         self.quote_ref.setWordWrap(True)
         quote_layout.addWidget(self.quote_ref)
@@ -377,7 +465,8 @@ class PrayerPanel(QWidget):
         )
         self.quote_detail.setEnabled(False)
         quote_layout.addWidget(self.quote_detail)
-        layout.addWidget(self.quote_box)
+        # Keep the reminder visible while the prayer list scrolls on small screens.
+        outer.addWidget(self.quote_box)
         self.status = label("", "muted")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -411,7 +500,8 @@ class PrayerPanel(QWidget):
             QApplication.screenAt(self.owner.geometry().center())
             or QApplication.primaryScreen()
         )
-        self.setFixedHeight(min(788, screen.availableGeometry().height() - 24))
+        preferred_height = 960 if self.owner.settings["calligraphy"] else 820
+        self.setFixedHeight(min(preferred_height, screen.availableGeometry().height() - 24))
         end = self.owner.panel_position()
         animate = (
             self.owner.settings["animations"]
@@ -483,7 +573,7 @@ class NamazWidget(QWidget):
         self._was_dragged = self._loading = False
         self._generation = 0
         self._last_day = self._last_notification = None
-        self._last_refresh = datetime.now()
+        self._last_refresh = monotonic()
         self._demo = False
         self.quote = None
         self.quote_error = ""
@@ -491,6 +581,12 @@ class NamazWidget(QWidget):
         self._quote_generation = 0
         self._quote_loading = False
         self._phase = self._hover = 0.0
+        self._orb_prayer = self._orb_previous = None
+        self._orb_blend = 1.0
+        self.emblem_animation = QVariantAnimation(self)
+        self.emblem_animation.setDuration(650)
+        self.emblem_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self.emblem_animation.valueChanged.connect(self._emblem_changed)
         self.hover_animation = QVariantAnimation(self)
         self.hover_animation.setDuration(180)
         self.hover_animation.valueChanged.connect(self._hover_value)
@@ -537,7 +633,8 @@ class NamazWidget(QWidget):
         p.drawEllipse(QRectF(5, 5, 118, 118))
         p.setPen(QPen(c(TEAL), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         p.drawArc(QRectF(9, 9, 110, 110), 90 * 16, -125 * 16)
-        draw_symbol(p, self.settings["symbol"], 61, 63, 66, GOLD)
+        if not self.settings["calligraphy"] or not draw_emblem(p, "Fajr", QRectF(23, 20, 82, 88), GOLD):
+            draw_symbol(p, self.settings["symbol"], 61, 63, 66, GOLD)
         p.end()
         return QIcon(pix)
 
@@ -634,10 +731,21 @@ class NamazWidget(QWidget):
         super().moveEvent(event)
 
     def refresh(self):
+        if self._loading:
+            return
         self._generation += 1
         generation, config = self._generation, dict(self.settings)
+        if not self.days and config["time_source"] == "ditib":
+            try:
+                today = self._now().date()
+                self.days = [
+                    day for day in read_cached_calendar(config, data_path() / "cache", today=today)
+                    if -1 <= (day.day - today).days <= 1
+                ]
+            except (OSError, ValueError, TypeError, KeyError):
+                pass
         self._loading = True
-        self._last_refresh = datetime.now()
+        self._last_refresh = monotonic()
         self._render_state()
 
         def task():
@@ -649,7 +757,8 @@ class NamazWidget(QWidget):
                     days = [
                         day for day in calendar if -1 <= (day.day - today).days <= 1
                     ]
-                except (ConnectionError, ValueError) as exc:
+                except Exception as exc:
+                    logging.getLogger(__name__).exception("Gebetskalender konnte nicht geladen werden")
                     errors.append(str(exc))
             else:
                 for offset in (-1, 0, 1):
@@ -661,7 +770,8 @@ class NamazWidget(QWidget):
                                 data_path() / "cache",
                             )
                         )
-                    except (ConnectionError, ValueError) as exc:
+                    except Exception as exc:
+                        logging.getLogger(__name__).exception("Gebetszeiten konnten nicht geladen werden")
                         errors.append(str(exc))
             self.loaded.emit(days, "; ".join(errors), generation)
 
@@ -670,8 +780,19 @@ class NamazWidget(QWidget):
     def _received(self, days, error, generation):
         if generation != self._generation:
             return
-        self.days, self.error, self._loading = days, error, False
-        self.online = any(not day.cached for day in days)
+        # Keep verified dates through transient failures; location changes clear them.
+        retained = {day.day: replace(day, cached=True) for day in self.days}
+        retained.update({day.day: day for day in days})
+        now = self._now().date()
+        self.days = sorted(
+            (day for day in retained.values() if -1 <= (day.day - now).days <= 1),
+            key=lambda day: day.day,
+        )
+        self.error, self._loading = error, False
+        today = self._today()
+        self.online = today is not None and not today.cached
+        # Schedule from completion so a failed/slow request cannot cause a retry loop.
+        self._last_refresh = monotonic()
         self._last_day = self._now().date()
         self._render_state()
 
@@ -688,9 +809,10 @@ class NamazWidget(QWidget):
 
     def _tick(self):
         now = self._now()
+        retry_interval = 30 if not self.online or self.error else 1800
         if not self._loading and (
             self._last_day != now.date()
-            or (datetime.now() - self._last_refresh).total_seconds() > 1800
+            or monotonic() - self._last_refresh >= retry_interval
         ):
             self.refresh()
         if self.settings["notifications"] and not self._demo:
@@ -715,6 +837,26 @@ class NamazWidget(QWidget):
         if self.settings["animations"] and self.isVisible():
             self._phase += 0.045
             self.update()
+
+    def _emblem_changed(self, value):
+        self._orb_blend = float(value)
+        self.update()
+
+    def _set_orb_prayer(self, prayer):
+        if prayer == self._orb_prayer:
+            if not self.settings["animations"]:
+                self.emblem_animation.stop()
+                self._emblem_changed(1.0)
+            return
+        previous = self._orb_prayer
+        self.emblem_animation.stop()
+        self._orb_previous, self._orb_prayer = previous, prayer
+        if previous is None or not self.settings["animations"]:
+            self._emblem_changed(1.0)
+            return
+        self.emblem_animation.setStartValue(0.0)
+        self.emblem_animation.setEndValue(1.0)
+        self.emblem_animation.start()
 
     def _hover_value(self, value):
         self._hover = float(value)
@@ -742,6 +884,7 @@ class NamazWidget(QWidget):
             return
         panel = self.panel
         today, now, upcoming = self._today(), self._now(), self._next()
+        self._set_orb_prayer(upcoming[0] if upcoming else "Fajr")
         panel.date.setText(
             f"{WEEKDAYS[now.weekday()]}, {now.day}. {MONTHS[now.month - 1]} {now.year}"
         )
@@ -754,9 +897,14 @@ class NamazWidget(QWidget):
         accent = current_palette(self.settings["theme"])["accent"]
         for prayer, row in panel.rows.items():
             row.active = prayer == active
+            calligraphy = self.settings["calligraphy"]
+            row.setMinimumHeight(80 if calligraphy else 46)
+            row.calligraphy.setVisible(calligraphy)
+            row.calligraphy.set_active(row.active)
+            row.edit.setVisible(not calligraphy)
             row.time.setText(today.times[prayer].strftime("%H:%M") if today else "–:–")
             row.detail.setIcon(
-                icon_for(
+                QIcon() if calligraphy else icon_for(
                     self.settings["icons"].get(prayer, DEFAULT_ICONS[prayer]),
                     color=accent if row.active else GOLD,
                 )
@@ -793,15 +941,15 @@ class NamazWidget(QWidget):
             panel.status.setText("Gebetszeiten werden aktualisiert …")
         elif not today:
             panel.status.setText(
-                "Keine aktuellen Zeiten. Verbindung prüfen oder erneut aktualisieren."
+                "Keine aktuellen Zeiten · Neuer Versuch automatisch in 30 Sekunden."
             )
         elif self.error:
             panel.status.setText(
-                "Zeiten teilweise verfügbar · Aktualisierung später erneut versuchen."
+                "Zeiten teilweise verfügbar · Neuer Versuch automatisch in 30 Sekunden."
             )
         else:
             panel.status.setText(
-                f"Gespeichert · {today.source}"
+                f"Gespeichert · {today.source} · Automatischer Verbindungsversuch alle 30 Sekunden"
                 if today.cached
                 else f"Aktuell · {today.source}"
             )
@@ -817,6 +965,7 @@ class NamazWidget(QWidget):
         )
         save(self.settings)
         self.days = []
+        self._loading = False
         self.panel.sync_city()
         self._rebuild_menu()
         self.refresh()
@@ -856,6 +1005,7 @@ class NamazWidget(QWidget):
             for k in ("city", "country", "location", "time_source", "method", "school")
         ):
             self.days = []
+            self._loading = False
             self.refresh()
         if previous["quote_source"] != self.settings["quote_source"]:
             self.quote = None
@@ -914,12 +1064,9 @@ class NamazWidget(QWidget):
         self.panel.next_quote.setEnabled(True)
         if quote:
             self.quote = quote
+            self.panel.quote_text.setText(self.quote.text)
+            self.panel.quote_scroll.verticalScrollBar().setValue(0)
         if self.quote:
-            text = self.quote.text
-            # Preview is marked with ellipsis; detail preserves the full source text.
-            if len(text) > 165:
-                text = text[:162].rsplit(" ", 1)[0] + " …"
-            self.panel.quote_text.setText(text)
             self.panel.quote_heading.setText(
                 "KORAN · ÜBERSETZUNG"
                 if self.quote.kind == "quran"
@@ -1071,7 +1218,10 @@ class NamazWidget(QWidget):
             )
         )
         p.drawArc(QRectF(9, 9, 110, 110), 90 * 16, -int(max(0.015, pct) * 360 * 16))
-        draw_symbol(p, self.settings["symbol"], 62, 44 - self._hover * 2, 34, "#E9BE78")
+        if self.settings["calligraphy"]:
+            self._paint_orb_emblem(p)
+        else:
+            draw_symbol(p, self.settings["symbol"], 62, 44 - self._hover * 2, 34, "#E9BE78")
         p.setPen(c("#C9D9D5"))
         p.setFont(font(8, 500))
         p.drawText(
@@ -1088,6 +1238,21 @@ class NamazWidget(QWidget):
             time_text = "lädt …" if self._loading else "offline"
         p.drawText(QRectF(17, 84, 94, 22), Qt.AlignmentFlag.AlignCenter, time_text)
         p.end()
+
+    def _paint_orb_emblem(self, painter):
+        blend = self._orb_blend
+        for prayer, opacity, offset in (
+            (self._orb_previous, 1 - blend, -5 * blend),
+            (self._orb_prayer or "Fajr", blend, 5 * (1 - blend)),
+        ):
+            if prayer is None or opacity <= 0:
+                continue
+            painter.save()
+            painter.setOpacity(opacity)
+            rect = QRectF(31, 13 + offset - self._hover * 2, 66, 57)
+            if not draw_emblem(painter, prayer, rect, "#E9BE78"):
+                draw_symbol(painter, self.settings["symbol"], 62, 44 + offset, 34, "#E9BE78")
+            painter.restore()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

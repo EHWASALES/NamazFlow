@@ -7,6 +7,7 @@ Never silently substitute a different calculation when the calendar is unavailab
 from datetime import date, datetime
 from html.parser import HTMLParser
 import json
+import logging
 from pathlib import Path
 import re
 from urllib.request import Request, urlopen
@@ -141,24 +142,36 @@ def get_calendar(config, cache_dir: Path, *, transport=None, today=None):
         days = parse_calendar(html, key)
         if today not in days:
             raise ValueError("Der Kalender enthält das heutige Datum nicht")
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        temporary = file.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps({"city": key, "html": html}, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        temporary.replace(file)
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            temporary = file.with_suffix(".tmp")
+            temporary.write_text(
+                json.dumps({"city": key, "html": html}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            temporary.replace(file)
+        except OSError:
+            # A disk problem must not discard successfully validated live times.
+            logging.getLogger(__name__).warning("Kalender konnte nicht gespeichert werden", exc_info=True)
         return sorted(days.values(), key=lambda day: day.day)
     except (OSError, ValueError, TypeError, KeyError) as exc:
+        logging.getLogger(__name__).warning("Diyanet-Abruf fehlgeschlagen: %s", exc)
         try:
-            payload = json.loads(file.read_text(encoding="utf-8"))
-            if payload["city"] != key:
-                raise ValueError("Calendar location mismatch")
-            days = parse_calendar(payload["html"], key, cached=True)
-            if today not in days:
-                raise ValueError("Kein gespeicherter Kalender für heute vorhanden")
-            return sorted(days.values(), key=lambda day: day.day)
+            return read_cached_calendar(config, cache_dir, today=today)
         except (OSError, ValueError, TypeError, KeyError):
             raise ConnectionError(
                 "DİTİB-/Diyanet-Zeiten derzeit nicht verfügbar. Bitte später aktualisieren."
             ) from exc
+
+
+def read_cached_calendar(config, cache_dir: Path, *, today=None):
+    """Load only matching, validated dates, without waiting for the network."""
+    key = calendar_key(config)
+    today = today or datetime.now(ZoneInfo("Europe/Berlin")).date()
+    payload = json.loads((cache_dir / f"diyanet-{key}.json").read_text(encoding="utf-8"))
+    if payload["city"] != key:
+        raise ValueError("Calendar location mismatch")
+    days = parse_calendar(payload["html"], key, cached=True)
+    if today not in days:
+        raise ValueError("Kein gespeicherter Kalender für heute vorhanden")
+    return sorted(days.values(), key=lambda day: day.day)

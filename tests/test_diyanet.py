@@ -65,3 +65,11 @@ def test_new_default_and_legacy_darmstadt_use_official_calendar():
 
 def test_turkish_prayer_names():
     assert list(LABELS.values()) == ["Sabah", "Öğle", "İkindi", "Akşam", "Yatsı"]
+
+
+def test_valid_live_calendar_survives_cache_write_failure(tmp_path):
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("blocked", encoding="utf-8")
+    days = get_calendar(normalize({}), blocked, transport=lambda url: HTML, today=TODAY)
+    assert days[0].day == TODAY
+    assert not days[0].cached

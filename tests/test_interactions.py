@@ -18,6 +18,8 @@ from namazflow.prayers import get_day
 from namazflow.quotes import get_quote, parse_quote, quote_spec
 from test_core import sample_payload
 
+REAL_REFRESH = ui.NamazWidget.refresh
+
 
 @pytest.fixture(scope="session")
 def app():
@@ -137,6 +139,131 @@ def test_stale_location_response_is_ignored(widget):
     assert widget.days == []
 
 
+@pytest.mark.parametrize("cached,error,interval", [(True, "", 30), (False, "", 1800), (False, "partial", 30)])
+def test_retries_after_outage_and_returns_to_normal_interval(widget, monkeypatch, cached, error, interval):
+    from dataclasses import replace
+    from namazflow.diyanet import parse_calendar
+    from test_diyanet import HTML, TODAY
+
+    day = replace(parse_calendar(HTML, "darmstadt")[TODAY], cached=cached)
+    monkeypatch.setattr(widget, "_now", lambda: day.times["Dhuhr"])
+    clock = [100.0]
+    monkeypatch.setattr(ui, "monotonic", lambda: clock[0])
+    widget._received([day], error, widget._generation)
+    assert widget.online is (not cached)
+    calls = []
+    monkeypatch.setattr(widget, "refresh", lambda: calls.append(True))
+    clock[0] += interval - 1
+    widget._tick()
+    assert calls == []
+    clock[0] += 1
+    widget._tick()
+    assert calls == [True]
+    # An in-flight request must never trigger another automatic request.
+    widget._loading = True
+    widget._tick()
+    assert calls == [True]
+
+
+def test_other_dates_do_not_hide_missing_current_day(widget, monkeypatch):
+    from datetime import timedelta
+    from namazflow.diyanet import parse_calendar
+    from test_diyanet import HTML
+
+    days = list(parse_calendar(HTML, "darmstadt").values())
+    monkeypatch.setattr(widget, "_now", lambda: days[-1].times["Dhuhr"] + timedelta(days=1))
+    widget._received(days, "", widget._generation)
+    assert widget._today() is None
+    assert not widget.online
+
+
+def test_failed_request_recovers_without_restart(widget, monkeypatch):
+    from namazflow.diyanet import parse_calendar
+    from test_diyanet import HTML, TODAY
+
+    day = parse_calendar(HTML, "darmstadt")[TODAY]
+    monkeypatch.setattr(widget, "_now", lambda: day.times["Dhuhr"])
+    clock = [100.0]
+    monkeypatch.setattr(ui, "monotonic", lambda: clock[0])
+    widget._received([], "offline", widget._generation)
+    assert not widget.online
+    calls = []
+    monkeypatch.setattr(widget, "refresh", lambda: calls.append(True))
+    clock[0] += 30
+    widget._tick()
+    assert calls == [True]
+    widget._received([day], "", widget._generation)
+    assert widget.online and widget.error == ""
+    clock[0] += 30
+    widget._tick()
+    assert calls == [True]
+    clock[0] += 1770
+    widget._tick()
+    assert calls == [True, True]
+
+
+def test_refresh_failure_keeps_verified_times_and_countdown(widget, monkeypatch):
+    from namazflow.diyanet import parse_calendar
+    from test_diyanet import HTML, TODAY
+
+    day = parse_calendar(HTML, "darmstadt")[TODAY]
+    monkeypatch.setattr(widget, "_now", lambda: day.times["Dhuhr"])
+    widget._received([day], "", widget._generation)
+    before = widget._next()
+    widget._received([], "offline", widget._generation)
+    assert widget._today().times == day.times
+    assert widget._today().cached
+    assert not widget.online
+    assert widget._next() == before
+    assert widget.error == "offline"
+
+
+def test_cached_calendar_is_visible_before_network_finishes(widget, monkeypatch):
+    from namazflow.diyanet import parse_calendar
+    from test_diyanet import HTML, TODAY
+
+    day = parse_calendar(HTML, "darmstadt", cached=True)[TODAY]
+    monkeypatch.setattr(widget, "_now", lambda: day.times["Dhuhr"])
+    monkeypatch.setattr(ui, "read_cached_calendar", lambda *args, **kwargs: [day])
+    starts = []
+
+    class PendingThread:
+        def __init__(self, **kwargs):
+            pass
+
+        def start(self):
+            starts.append(True)
+
+    monkeypatch.setattr(ui.threading, "Thread", PendingThread)
+    # Use the real method, bypassing the fixture's no-network replacement.
+    REAL_REFRESH(widget)
+    assert widget._today() == day
+    assert widget._next() is not None
+    assert widget._loading
+    REAL_REFRESH(widget)
+    assert starts == [True]
+
+
+def test_unexpected_provider_error_releases_loading_state(widget, monkeypatch):
+    monkeypatch.setattr(ui, "read_cached_calendar", lambda *args, **kwargs: [])
+
+    def broken_provider(*args, **kwargs):
+        raise RuntimeError("unexpected provider failure")
+
+    class ImmediateThread:
+        def __init__(self, target, **kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(ui, "get_calendar", broken_provider)
+    monkeypatch.setattr(ui.threading, "Thread", ImmediateThread)
+    REAL_REFRESH(widget)
+    assert not widget._loading
+    assert "unexpected provider failure" in widget.error
+
+
 @pytest.mark.parametrize("key", LOCATIONS)
 def test_coordinates_and_location_cache_isolation(key, tmp_path):
     requests = []
@@ -225,7 +352,7 @@ def test_sources_rotate_and_settings_persist(tmp_path):
     assert load(tmp_path / "settings.json") == config
 
 
-def test_quote_full_text_preserved_and_stale_response_ignored(widget):
+def test_quote_full_text_preserved_and_stale_response_ignored(widget, app):
     from namazflow.quotes import Quote
 
     quote = Quote(
@@ -239,34 +366,72 @@ def test_quote_full_text_preserved_and_stale_response_ignored(widget):
     widget._quote_received(quote, "", 1)
     assert widget.quote is None
     widget._quote_received(quote, "", 2)
+    widget.open_panel()
+    app.processEvents()
     assert widget.quote.text == quote.text
-    assert len(widget.panel.quote_text.text()) < len(quote.text)
+    assert widget.panel.quote_text.text() == quote.text
+    assert widget.panel.quote_scroll.verticalScrollBar().maximum() > 0
     assert widget.panel.quote_detail.isEnabled()
+    widget.panel.quote_scroll.verticalScrollBar().setValue(20)
+    position = widget.panel.quote_scroll.verticalScrollBar().value()
+    widget._quote_received(None, "Netzwerkfehler", 2)
+    assert widget.panel.quote_text.text() == quote.text
+    assert widget.panel.quote_scroll.verticalScrollBar().value() == position
 
 
-def test_layout_fits_long_location_and_source(widget, app):
+@pytest.mark.parametrize("calligraphy", [True, False])
+def test_layout_fits_long_location_and_source(widget, app, calligraphy):
+    widget.settings["calligraphy"] = calligraphy
     widget.switch_location("niederhoechstadt")
     widget.open_panel()
     app.processEvents()
     assert widget.panel.content.width() <= widget.panel.scroll.viewport().width()
     for row in widget.panel.rows.values():
-        assert row.time.geometry().right() < row.edit.geometry().left()
+        if not calligraphy:
+            assert row.time.geometry().right() < row.edit.geometry().left()
+        else:
+            assert row.calligraphy.geometry().right() < row.detail.geometry().left()
+            assert row.calligraphy.text() == ui.ARABIC_PRAYERS[row.prayer]
+            assert row.calligraphy.isVisible()
+            assert row.rect().contains(row.calligraphy.geometry())
+            assert row.edit.isHidden()
         assert row.detail.geometry().right() < row.time.geometry().left()
     assert widget.panel.close_button.isVisible()
 
 
-def test_small_screen_scroll_keeps_quote_controls_reachable(widget, app):
+def test_small_screen_keeps_quote_visible_without_scrolling(widget, app):
+    from namazflow.quotes import Quote
+
+    widget._quote_received(
+        Quote(
+            "Ein langer Testtext. " * 50,
+            "Hadith · Ahmad, at-Tirmidhi, an-Nasa'i, Ibn Majah, Ibn Hibban und al-Hakim · Authentisch",
+            "https://example.com",
+            "hadith",
+            "Testquelle",
+        ),
+        "",
+        widget._quote_generation,
+    )
     widget.open_panel()
     widget.panel.setFixedHeight(420)
     app.processEvents()
     bar = widget.panel.scroll.verticalScrollBar()
     assert bar.maximum() > 0
-    bar.setValue(bar.maximum())
-    app.processEvents()
-    point = widget.panel.quote_detail.mapTo(
-        widget.panel.scroll.viewport(), widget.panel.quote_detail.rect().center()
+    quote_widgets = (
+        widget.panel.quote_heading,
+        widget.panel.quote_scroll,
+        widget.panel.quote_ref,
+        widget.panel.quote_detail,
     )
-    assert widget.panel.scroll.viewport().rect().contains(point)
+    for value in (0, bar.maximum()):
+        bar.setValue(value)
+        app.processEvents()
+        for part in quote_widgets:
+            bounds = part.rect().translated(part.mapTo(widget.panel, QPoint(0, 0)))
+            assert widget.panel.rect().contains(bounds)
+            assert bounds.top() > widget.panel.scroll.geometry().bottom()
+    assert widget.panel.quote_scroll.height() == 100
 
 
 def test_disabled_quotes_reclaim_layout_space(widget, app):
@@ -285,6 +450,37 @@ def test_rows_use_turkish_names(widget):
         "Akşam",
         "Yatsı",
     ]
+
+
+def test_emblem_transition_progress_and_reduced_motion(widget):
+    widget.settings["animations"] = True
+    widget._set_orb_prayer("Fajr")
+    widget._set_orb_prayer("Dhuhr")
+    assert widget._orb_previous == "Fajr"
+    assert widget._orb_prayer == "Dhuhr"
+    widget.emblem_animation.setCurrentTime(325)
+    assert 0 < widget._orb_blend < 1
+    widget._set_orb_prayer("Dhuhr")
+    assert widget.emblem_animation.currentTime() == 325
+    widget.settings["animations"] = False
+    widget._set_orb_prayer("Dhuhr")
+    assert widget._orb_blend == 1
+    widget._set_orb_prayer("Asr")
+    assert widget._orb_prayer == "Asr" and widget._orb_blend == 1
+
+
+def test_prayer_emblems_have_transparency_and_distinct_artwork(app):
+    from namazflow.calligraphy import ASSETS, emblem
+    from hashlib import sha256
+
+    hashes = set()
+    for prayer in ui.PRAYERS:
+        source = ASSETS / f"{prayer.lower()}.png"
+        hashes.add(sha256(source.read_bytes()).hexdigest())
+        image = emblem(prayer, "#DBAE67").toImage()
+        assert not image.isNull() and image.hasAlphaChannel()
+        assert image.pixelColor(0, 0).alpha() == 0
+    assert len(hashes) == 5
 
 
 def test_explicit_exit_is_different_from_hide(widget, monkeypatch):

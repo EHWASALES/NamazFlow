@@ -1,13 +1,26 @@
 """Launch NamazFlow (Windows 10/11)."""
 
 import sys
+import logging
+from logging.handlers import RotatingFileHandler
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QLockFile, QStandardPaths, QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from namazflow.ui import NamazWidget
+from namazflow.config import data_path
 
 
 def main():
+    if "--smoke-test" not in sys.argv:
+        try:
+            data_path().mkdir(parents=True, exist_ok=True)
+            handler = RotatingFileHandler(data_path() / "NamazFlow.log", maxBytes=500_000, backupCount=2, encoding="utf-8")
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+            logging.getLogger().addHandler(handler)
+            logging.getLogger().setLevel(logging.INFO)
+            logging.info("NamazFlow startet")
+        except OSError:
+            pass
     app = QApplication(sys.argv)
     app.setApplicationName("NamazFlow")
     app.setOrganizationName("NamazFlow")

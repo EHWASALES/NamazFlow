@@ -15,6 +15,8 @@ A calm, elegant **floating prayer-times companion for Windows 10/11**, inspired 
 - City/country, calculation method (Diyanet, MWL, ISNA, Umm Al-Qura, etc.) and Hanafi/standard Asr.
 - System tray, optional autostart, optional prayer-start notifications, locally saved settings.
 - Validated cached days for offline use **without inventing times**. If current-day data is unavailable, display a warning.
+- After a failed or cached prayer-time response, retry automatically every 30 seconds after request completion. Successful complete responses restore the normal 30-minute refresh interval. Retry timing uses a monotonic clock and requests run in the background.
+- Validated Diyanet cache data appears immediately at startup while the network refresh runs. Failed refreshes retain matching verified dates in memory; cache write failures do not discard valid live responses. Duplicate refresh clicks are coalesced. Bounded diagnostic logs are saved under `%APPDATA%\NamazFlow\NamazFlow.log`.
 
 ## Installation (development)
 
@@ -38,6 +40,9 @@ For a packaged executable, use the **Windows build** artifact from GitHub Action
 - **Click a prayer row** for its time and location. **Zitat & Quelle ansehen** opens the full, unabridged source text.
 - **Right-click** for separate open, collapse, hide, restore and exit actions. The tray icon or a second launch restores a hidden Flow.
 - The widget stores configuration under %APPDATA%\NamazFlow on Windows.
+- Enable **Mit Windows starten** in settings to launch NamazFlow automatically when you sign in to Windows. The preference is stored locally for your Windows account.
+
+Each prayer has its own gold calligraphic emblem with a teal highlight for the current prayer. The Turkish labels remain beside them. The floating orb shows the upcoming prayer's emblem; a 650ms fade and slight vertical motion accompany each change. The current prayer's emblem tint also transitions smoothly. Disabling animations makes changes immediate. Turn off “Arabische Gebetsnamen mit goldenen Ornamenten” in settings to return to editable symbols. The bundled [Amiri](https://github.com/aliftype/amiri) typeface provides fallback lettering under the SIL Open Font License; its license is included in `namazflow/fonts/OFL.txt`. Emblem art and its generation notes live in `namazflow/assets/calligraphy/`.
 
 ## Calculation and reliability
 
@@ -82,13 +87,13 @@ No open-source license is granted yet. Copyright belongs to the repository owner
 - The orb reads **bis Öğle · 3h 33m**, for example: remaining hours and minutes, not a clock time. The panel spells out units and shows the target time.
 - The new crescent and five-point star replace the crossed minaret strokes. All toolbar icons are vectors and do not depend on symbol fonts.
 - The panel fades/slides in, the orb responds to hover with a soft halo, and prayer rows animate on hover. Animations can be disabled in settings.
-- Native layouts handle spacing; a scroll area keeps controls reachable on small or highly scaled displays.
+- Native layouts handle spacing; prayer times scroll on small or highly scaled displays while the quote and its source controls stay visible at the bottom of the open panel.
 
 ### Quran and hadith reminders
 
 German source texts are loaded in the background from [QuranEnc](https://quranenc.com/en/home/api/) (Bubenheim/Elyas) and the official [HadeethEnc API](https://github.com/islamhouse-dev/hadith-api). Select Quran, hadith, or alternating sources in settings. The refresh button advances the selection; automatic rotation runs every five minutes. Six verses and six curated hadith entries are available in this version.
 
-Each text has its verse reference or collection attribution, publisher, and a direct source link. HadeethEnc entry IDs are not collection hadith numbers. Translated collection names are shown for readability; the original API attribution remains in the detail view. Long previews end in an ellipsis; the detail view retains the full text. API responses are validated against the requested ID before display or caching. On failure the matching cached response is used and marked; without one, the UI displays an unavailable message, never an invented quote.
+Each text has its verse reference or collection attribution, publisher, and a direct source link. HadeethEnc entry IDs are not collection hadith numbers. Translated collection names are shown for readability; the original API attribution remains in the detail view. The full text appears in a scrollable quote area, and the detail view includes the full source information. API responses are validated against the requested ID before display or caching. On failure the matching cached response is used and marked; without one, the UI displays an unavailable message, never an invented quote.
 
 ### Update checks
 

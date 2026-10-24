@@ -15,5 +15,8 @@ dev = ["pytest>=8,<10", "Pillow>=10,<13"]
 [tool.setuptools.packages.find]
 include = ["namazflow*"]
 
+[tool.setuptools.package-data]
+namazflow = ["fonts/*.ttf", "fonts/OFL.txt", "assets/calligraphy/*.png"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

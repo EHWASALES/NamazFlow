@@ -20,6 +20,7 @@ DEFAULTS = {
     "x": None,
     "y": None,
     "quote": True,
+    "calligraphy": True,
     "animations": True,
     "quote_source": "mixed",
     "location": "",

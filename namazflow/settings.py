@@ -87,6 +87,12 @@ class SettingsDialog(QDialog):
         form.addRow("Design", self.theme)
         form.addRow("Schwebendes Symbol", self.symbol)
         layout.addLayout(form)
+        self.calligraphy = QCheckBox("Arabische Gebetsnamen mit goldenen Ornamenten")
+        self.calligraphy.setChecked(config.get("calligraphy", True))
+        self.calligraphy.setToolTip("Eigene Embleme für alle Gebete; im Kreis erscheint das nächste Gebet.")
+        self.symbol.setDisabled(self.calligraphy.isChecked())
+        self.calligraphy.toggled.connect(self.symbol.setDisabled)
+        layout.addWidget(self.calligraphy)
         self.notifications = QCheckBox("Dezente Gebetsbenachrichtigungen")
         self.notifications.setChecked(config["notifications"])
         self.autostart = QCheckBox("Mit Windows starten")
@@ -140,6 +146,7 @@ class SettingsDialog(QDialog):
             "location": self.location.currentData(),
             "time_source": self.time_source.currentData(),
             "animations": self.animations.isChecked(),
+            "calligraphy": self.calligraphy.isChecked(),
             "quote_source": self.quote_source.currentData(),
             "city": self.city.text().strip(),
             "country": self.country.text().strip(),
